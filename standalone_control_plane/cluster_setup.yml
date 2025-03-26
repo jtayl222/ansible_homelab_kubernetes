@@ -1,0 +1,27 @@
+---
+
+- name: Set up k3s control plane
+  hosts: k3s_control_plane
+  become: yes
+  roles:
+    - k3s_control_plane
+
+- name: Read fetched token on controller
+  hosts: localhost
+  connection: local
+  tasks:
+    - name: Slurp the token file
+      ansible.builtin.slurp:
+        src: ./fetched_tokens/{{ groups['k3s_control_plane'][0] }}-node-token
+      register: token_content
+
+    - name: Set token as fact
+      ansible.builtin.set_fact:
+        k3s_token: "{{ token_content['content'] | b64decode | trim }}"
+
+
+- name: Set up k3s worker nodes
+  hosts: k3s_worker
+  become: yes
+  roles:
+    - k3s_worker

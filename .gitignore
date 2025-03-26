@@ -1,0 +1,85 @@
+# Ansible inventory files with IP addresses and credentials
+**/inventory/hosts*
+!**/inventory/hosts.example
+
+# Group vars that may contain sensitive data
+**/group_vars/*
+!**/group_vars/*.example
+
+# Fetched tokens and credentials
+**/fetched_tokens/
+**/tokens/
+**/*-node-token
+**/*.token
+
+# Vault password files
+.vault_pass
+*.vault
+vault.key
+vault_password
+
+# SSH keys and certificates
+*.pem
+*.key
+*.pub
+id_rsa
+id_dsa
+known_hosts
+authorized_keys
+
+# Temporary files
+*.retry
+*.tmp
+*.temp
+.ansible
+ansible.log
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# Cache directories
+.cache/
+__pycache__/
+
+# Environment files that might contain sensitive data
+.env
+.envrc
+.env.*
+
+# macOS specific files
+.DS_Store
+
+# Windows specific files
+Thumbs.db
+Desktop.ini
+
+# Editor specific files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Python virtual environment
+venv/
+env/
+.venv/
+.python-version
+
+# Log files
+*.log
+logs/
+
+# Other common sensitive files
+kubeconfig
+.kube/
+**/*kubeconfig*
+**/*config.yaml
+**/*.conf
+**/*.cfg
+**/*secret*
+**/*password*
+**/*credential*
+
+*/OLD/**

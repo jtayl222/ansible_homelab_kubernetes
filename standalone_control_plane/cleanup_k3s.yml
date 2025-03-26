@@ -1,0 +1,25 @@
+---
+- name: Cleanup k3s from control plane
+  hosts: k3s_control_plane
+  become: yes
+  tasks:
+    - name: Run k3s uninstall script
+      ansible.builtin.shell: /usr/local/bin/k3s-uninstall.sh
+      ignore_errors: yes
+
+- name: Cleanup k3s from worker nodes
+  hosts: k3s_worker
+  become: yes
+  tasks:
+    - name: Run k3s agent uninstall script
+      ansible.builtin.shell: /usr/local/bin/k3s-agent-uninstall.sh
+      ignore_errors: yes
+      when: inventory_hostname not in groups['k3s_control_plane']
+
+    - name: Remove residual files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/rancher/k3s
+        - /var/lib/rancher/k3s

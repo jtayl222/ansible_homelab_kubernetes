@@ -1,0 +1,14 @@
+---
+- name: Ensure k3s is installed on worker nodes
+  ansible.builtin.shell: |
+    curl -sfL https://get.k3s.io | K3S_URL=https://{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}:6443 K3S_TOKEN={{ hostvars['localhost']['k3s_token'] }} sh -
+  args:
+    creates: /etc/rancher/k3s/k3s.yaml
+  register: k3s_install
+  when: inventory_hostname in groups['k3s_worker'] and inventory_hostname not in groups['k3s_control_plane']
+
+- name: Ensure k3s service is running
+  ansible.builtin.systemd:
+    name: k3s-agent
+    state: started
+    enabled: yes

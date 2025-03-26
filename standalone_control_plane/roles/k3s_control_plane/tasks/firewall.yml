@@ -1,0 +1,24 @@
+---
+- name: Allow Kubernetes API server traffic
+  ansible.builtin.ufw:
+    rule: allow
+    port: 6443
+    proto: tcp
+
+- name: Allow etcd traffic (if multi-control-plane)
+  ansible.builtin.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - 2379-2380  # etcd
+
+- name: Allow VXLAN traffic for flannel
+  ansible.builtin.ufw:
+    rule: allow
+    port: 8472
+    proto: udp
+
+- name: Ensure UFW is enabled
+  ansible.builtin.ufw:
+    state: enabled
