@@ -1,0 +1,12 @@
+---
+- name: Install NFS client on all Kubernetes nodes
+  hosts: k3s_control_plane:k3s_worker
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install NFS client packages
+      apt:
+        name:
+          - nfs-common
+        state: present
+        update_cache: yes

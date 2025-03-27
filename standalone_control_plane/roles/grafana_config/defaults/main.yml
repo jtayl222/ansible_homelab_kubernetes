@@ -1,0 +1,56 @@
+---
+# General Grafana settings
+grafana_namespace: monitoring
+grafana_release_name: grafana
+grafana_admin_password: "admin"
+
+# Service configuration
+grafana_service_type: ClusterIP
+grafana_service_port: 80
+grafana_target_port: 3000
+
+# Ingress settings
+grafana_ingress_enabled: true
+grafana_ingress_host: "grafana.{{ ansible_host }}.nip.io"
+grafana_subpath_enabled: true
+grafana_domain: "{{ grafana_ingress_host }}"
+grafana_ingress_annotations:
+  kubernetes.io/ingress.class: nginx
+  nginx.ingress.kubernetes.io/ssl-redirect: "false"
+
+# Persistent storage settings
+grafana_persistence_enabled: true
+grafana_persistence_size: 10Gi
+grafana_storage_class_name: standard
+
+# Resource allocation
+grafana_resources_limits_cpu: 200m
+grafana_resources_limits_memory: 256Mi
+grafana_resources_requests_cpu: 100m
+grafana_resources_requests_memory: 128Mi
+
+# Prometheus connection settings
+prometheus_service_name: prometheus-server
+prometheus_namespace: monitoring
+prometheus_port: 80
+
+# Dashboard import settings
+grafana_import_dashboards: true
+grafana_custom_dashboards:
+  - name: prometheus-stats
+    gnetId: 2
+    revision: 2
+  - name: node-exporter-full
+    gnetId: 1860
+    revision: 27
+
+# Grafana plugin list
+grafana_plugins:
+  - grafana-piechart-panel
+  - grafana-clock-panel
+  - grafana-simple-json-datasource
+
+# Set timeout for Helm operations (seconds)
+helm_operation_timeout: 600
+
+kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"

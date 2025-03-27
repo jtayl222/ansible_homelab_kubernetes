@@ -1,0 +1,136 @@
+---
+- name: Fix Grafana 404 with Traefik (IPv4 focus)
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    grafana_namespace: monitoring
+    grafana_release_name: grafana
+    traefik_namespace: kube-system
+  
+  tasks:
+    - name: Get IPv4 address of control plane
+      shell: "ip -4 addr show | grep -oP '(?<=inet\\s)\\d+(\\.\\d+){3}' | grep -v 127.0.0.1 | head -1"
+      register: ipv4_address
+      changed_when: false
+    
+    - name: Display IPv4 address
+      debug:
+        msg: "Using IPv4 address: {{ ipv4_address.stdout }}"
+        
+    # Create simpler Traefik middleware specifically for grafana
+    - name: Create Grafana strip prefix middleware
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-strip-middleware.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: Middleware
+          metadata:
+            name: grafana-stripprefix
+            namespace: {{ grafana_namespace }}
+          spec:
+            stripPrefix:
+              prefixes:
+                - /grafana
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply Grafana middleware
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-strip-middleware.yaml
+      delegate_to: localhost
+      become: false
+      
+    # Create very simple IngressRoute
+    - name: Create simplified IngressRoute for Grafana
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-simple-route.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-route
+            namespace: {{ grafana_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/grafana`) || PathPrefix(`/grafana/`)
+                kind: Rule
+                middlewares:
+                  - name: grafana-stripprefix
+                services:
+                  - name: {{ grafana_release_name }}
+                    port: 80
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply simplified IngressRoute
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-simple-route.yaml
+      delegate_to: localhost
+      become: false
+    
+    # Configure Grafana for subpath via helm upgrade
+    - name: Create Grafana values file with subpath config
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-subpath-values.yaml"
+        content: |
+          grafana.ini:
+            server:
+              root_url: http://{{ ipv4_address.stdout }}/grafana/
+              serve_from_sub_path: true
+      delegate_to: localhost
+      become: false
+    
+    - name: Update Grafana with helm upgrade
+      command: >
+        helm --kubeconfig={{ kubeconfig_path }} upgrade {{ grafana_release_name }} 
+        grafana/grafana --namespace {{ grafana_namespace }} 
+        --values {{ playbook_dir }}/fetched_tokens/grafana-subpath-values.yaml 
+        --reuse-values
+      delegate_to: localhost
+      become: false
+      
+    - name: Create simplified test script
+      copy:
+        dest: "{{ playbook_dir }}/scripts/test_grafana_simple.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Quick test for Grafana behind Traefik
+          
+          NODE_IP="{{ ipv4_address.stdout }}"
+          PORT=$(kubectl --kubeconfig={{ kubeconfig_path }} get svc -n kube-system traefik -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}')
+          
+          echo "Testing Grafana at http://$NODE_IP:$PORT/grafana/"
+          curl -s -I "http://$NODE_IP:$PORT/grafana/" | head -1
+          
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/grafana/")
+          echo "HTTP Status: $HTTP_CODE"
+          
+          if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then
+            echo "✅ Grafana is accessible!"
+          else
+            echo "❌ Grafana is not accessible"
+          fi
+      delegate_to: localhost
+      become: false
+      
+    - name: Wait for Grafana to restart
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment {{ grafana_release_name }} -n {{ grafana_namespace }}
+      delegate_to: localhost
+      become: false
+      
+    - name: Display access information
+      debug:
+        msg:
+          - "Grafana configuration updated!"
+          - "-------------------------------------------" 
+          - "Access Grafana at: http://{{ ipv4_address.stdout }}:{{ traefik_port.stdout | default('80') }}/grafana/"
+          - "To test access, run: ./scripts/test_grafana_simple.sh"
+          - "-------------------------------------------"
+      delegate_to: localhost
+      become: false

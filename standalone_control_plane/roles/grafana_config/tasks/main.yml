@@ -1,0 +1,106 @@
+---
+- name: Add Grafana Helm repository
+  ansible.builtin.command: helm repo add grafana https://grafana.github.io/helm-charts
+  register: repo_add
+  changed_when: "'has been added' in repo_add.stdout"
+  failed_when: repo_add.rc != 0 and "already exists" not in repo_add.stderr
+  environment: "{{ kubeconfig_env | default({'KUBECONFIG': '/etc/rancher/k3s/k3s.yaml'}) }}"
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  register: repo_update
+  changed_when: repo_update.rc == 0
+  environment: "{{ kubeconfig_env | default({'KUBECONFIG': '/etc/rancher/k3s/k3s.yaml'}) }}"
+
+- name: Create namespace for Grafana
+  kubernetes.core.k8s:
+    name: monitoring
+    kind: Namespace
+    state: present
+  register: namespace
+
+- name: Create Grafana values file from template
+  ansible.builtin.template:
+    src: grafana-values.yaml.j2
+    dest: /tmp/grafana-values.yaml
+    mode: '0600'
+  register: grafana_values_file
+
+- name: Generate manifest without applying (dry-run)
+  ansible.builtin.template:
+    src: grafana-values.yaml.j2
+    dest: /tmp/grafana-values-dryrun.yaml
+  when: grafana_dry_run | bool
+  delegate_to: localhost
+  become: false
+
+- name: Display manifest that would be applied
+  ansible.builtin.debug:
+    msg: "{{ lookup('file', '/tmp/grafana-values-dryrun.yaml') }}"
+  when: grafana_dry_run | bool
+
+- name: Install/Upgrade Grafana using Helm
+  ansible.builtin.command: >
+    helm upgrade --install {{ grafana_release_name | default('grafana') }} 
+    grafana/grafana 
+    --namespace {{ grafana_namespace | default('monitoring') }} 
+    --values /tmp/grafana-values.yaml 
+    --wait 
+    --timeout {{ helm_operation_timeout | default(600) }}s
+  register: helm_install
+  changed_when: helm_install.rc == 0
+  environment: "{{ kubeconfig_env | default({'KUBECONFIG': '/etc/rancher/k3s/k3s.yaml'}) }}"
+
+- name: Wait for Grafana deployment to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: "{{ grafana_release_name }}"
+    namespace: "{{ grafana_namespace }}"
+    wait: yes
+    wait_sleep: 10
+    wait_timeout: 300
+    wait_condition:
+      type: Available
+      status: "True"
+  when: helm_install.changed
+
+- name: Get Grafana admin password
+  kubernetes.core.k8s_info:
+    api_version: v1
+    kind: Secret
+    name: "{{ grafana_release_name }}"
+    namespace: "{{ grafana_namespace }}"
+  register: grafana_secret
+  when: grafana_admin_password is not defined
+
+- name: Display Grafana access information
+  ansible.builtin.debug:
+    msg:
+      - "Grafana has been deployed successfully."
+      - "Access URL: http://{{ grafana_ingress_host }}"
+      - "Username: admin"
+      - "Password: {{ grafana_admin_password | default((grafana_secret.resources[0].data.admin_password | b64decode) if grafana_secret.resources is defined and grafana_secret.resources | length > 0 else 'Unknown') }}"
+  when: helm_install.changed
+
+- name: Create dashboard ConfigMap from template
+  ansible.builtin.template:
+    src: grafana-dashboards.yaml.j2
+    dest: /tmp/grafana-dashboards.yaml
+    mode: '0600'
+  register: grafana_dashboards_file
+  when: grafana_import_dashboards | default(true)
+
+- name: Apply Grafana dashboards ConfigMap
+  kubernetes.core.k8s:
+    src: /tmp/grafana-dashboards.yaml
+    state: present
+  register: dashboards_applied
+  environment: "{{ kubeconfig_env | default({'KUBECONFIG': '/etc/rancher/k3s/k3s.yaml'}) }}"
+  when: grafana_import_dashboards | default(true) and grafana_dashboards_file.changed
+
+# Add to grafana_config/defaults/main.yml
+grafana_dry_run: false
+
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: ansible-test

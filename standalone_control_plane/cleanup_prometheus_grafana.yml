@@ -1,0 +1,272 @@
+---
+- name: Clean up Prometheus and Grafana resources
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    prometheus_namespace: monitoring
+    prometheus_release_name: prometheus
+    grafana_release_name: grafana
+    delete_namespace: true  # Set to false if you want to keep the namespace
+    delete_pvc: true  # Delete Persistent Volume Claims if they exist
+    delete_configmaps: true  # Delete ConfigMaps
+    force_delete: false  # Set to true for forceful deletion
+
+  tasks:
+    - name: Ensure kubeconfig directory exists
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      delegate_to: localhost
+      become: false
+
+    - name: Fetch kubeconfig from k3s server if not exists
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Update kubeconfig server address if newly created
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_path }}"
+        regexp: 'https://127.0.0.1:6443'
+        replace: 'https://{{ ansible_default_ipv4.address }}:6443'
+      delegate_to: localhost
+      become: false
+      when: not kubeconfig_stat.stat.exists
+
+    - name: Check if namespace exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Namespace
+        name: "{{ prometheus_namespace }}"
+      register: namespace_check
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Skip cleanup if namespace doesn't exist
+      meta: end_play
+      when: namespace_check.failed or namespace_check.resources | length == 0
+
+    - name: Remove Traefik IngressRoute for Grafana
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        name: grafana-route
+        namespace: "{{ prometheus_namespace }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Check for other IngressRoutes in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        namespace: "{{ prometheus_namespace }}"
+      register: other_ingressroutes
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Remove all IngressRoutes in namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      loop: "{{ other_ingressroutes.resources | default([]) }}"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+      when: other_ingressroutes.resources is defined
+
+    - name: Remove Grafana using Helm
+      kubernetes.core.helm:
+        name: "{{ grafana_release_name }}"
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        wait: true
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Remove Prometheus using Helm
+      kubernetes.core.helm:
+        name: "{{ prometheus_release_name }}"
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        wait: true
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Wait for Helm releases to be fully removed (30s)
+      pause:
+        seconds: 30
+      delegate_to: localhost
+      become: false
+
+    # Cleanup PVCs if needed
+    - name: List PVCs in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: PersistentVolumeClaim
+        namespace: "{{ prometheus_namespace }}"
+      register: pvcs
+      delegate_to: localhost
+      become: false
+      when: delete_pvc | bool
+      ignore_errors: true
+
+    - name: Remove PVCs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ pvcs.resources | default([]) }}"
+      delegate_to: localhost
+      become: false
+      when: delete_pvc | bool and pvcs.resources is defined
+      ignore_errors: true
+
+    # Cleanup ConfigMaps
+    - name: List ConfigMaps in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: ConfigMap
+        namespace: "{{ prometheus_namespace }}"
+      register: configmaps
+      delegate_to: localhost
+      become: false
+      when: delete_configmaps | bool
+      ignore_errors: true
+
+    - name: Remove ConfigMaps
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ configmaps.resources | default([]) }}"
+      delegate_to: localhost
+      become: false
+      when: delete_configmaps | bool and configmaps.resources is defined and 'kube-root-ca.crt' not in item.metadata.name
+      ignore_errors: true
+
+    # Check for and delete any leftover deployments
+    - name: List remaining deployments
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Deployment
+        namespace: "{{ prometheus_namespace }}"
+      register: remaining_deployments
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Force delete remaining deployments if any
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: Deployment
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+        force: "{{ force_delete | bool }}"
+      with_items: "{{ remaining_deployments.resources | default([]) }}"
+      delegate_to: localhost
+      become: false
+      when: remaining_deployments.resources is defined
+      ignore_errors: true
+
+    # Check for and delete any leftover services
+    - name: List remaining services
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Service
+        namespace: "{{ prometheus_namespace }}"
+      register: remaining_services
+      delegate_to: localhost
+      become: false
+      ignore_errors: true
+
+    - name: Delete remaining services if any
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: Service
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ remaining_services.resources | default([]) }}"
+      delegate_to: localhost
+      become: false
+      when: remaining_services.resources is defined
+      ignore_errors: true
+
+    # Finally delete the namespace if requested
+    - name: Delete the monitoring namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        name: "{{ prometheus_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: absent
+        wait: true
+        wait_timeout: 120
+      delegate_to: localhost
+      become: false
+      when: delete_namespace | bool
+      ignore_errors: true
+
+    - name: Display cleanup status
+      debug:
+        msg:
+          - "===================================="
+          - "Prometheus and Grafana Cleanup Complete"
+          - "===================================="
+          - "The following resources have been removed:"
+          - "- Helm releases: {{ prometheus_release_name }} and {{ grafana_release_name }}"
+          - "- Traefik IngressRoutes for monitoring services"
+          - "- ConfigMaps: {{ 'All related ConfigMaps' if delete_configmaps else 'None (skipped)' }}"
+          - "- PVCs: {{ 'All related PVCs' if delete_pvc else 'None (skipped)' }}"
+          - "- Namespace: {{ prometheus_namespace if delete_namespace else 'Preserved (not deleted)' }}"
+          - "===================================="
+          - "If you encounter any remaining resources, run this playbook again with force_delete: true"
+          - "===================================="
+      delegate_to: localhost
+      become: false
+
+    # Optional: Clean up local files
+    - name: Remove local values files
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens/{{ item }}"
+        state: absent
+      with_items:
+        - "prometheus-values.yaml"
+        - "grafana-values.yaml" 
+        - "grafana-ingressroute.yaml"
+      delegate_to: localhost
+      become: false
+      ignore_errors: true

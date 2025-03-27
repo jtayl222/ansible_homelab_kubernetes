@@ -1,0 +1,75 @@
+---
+- name: Ensure required packages are installed
+  ansible.builtin.package:
+    name:
+      - curl
+      - apt-transport-https
+      - ca-certificates
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Check if Helm is already installed
+  ansible.builtin.command: which helm
+  register: helm_installed
+  changed_when: false
+  failed_when: false
+
+- name: Download and install Helm
+  ansible.builtin.shell: |
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+  when: helm_installed.rc != 0
+
+- name: Ensure kubectl is installed
+  ansible.builtin.package:
+    name: kubectl
+    state: present
+  when: ansible_os_family == "Debian" or ansible_os_family == "RedHat"
+
+- name: Create kube config directory
+  ansible.builtin.file:
+    path: ~/.kube
+    state: directory
+    mode: '0700'
+
+- name: Copy kubeconfig from k3s
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: ~/.kube/config
+    remote_src: yes
+    mode: '0600'
+  become: yes
+
+- name: Add stable Helm repository
+  ansible.builtin.command: helm repo add stable https://charts.helm.sh/stable
+  register: repo_add_stable
+  changed_when: "'has been added to your repositories' in repo_add_stable.stdout"
+  failed_when: repo_add_stable.rc != 0 and "already exists" not in repo_add_stable.stderr
+
+- name: Add prometheus-community repository
+  ansible.builtin.command: helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+  register: repo_add_prometheus
+  changed_when: "'has been added to your repositories' in repo_add_prometheus.stdout"
+  failed_when: repo_add_prometheus.rc != 0 and "already exists" not in repo_add_prometheus.stderr
+
+- name: Add grafana repository
+  ansible.builtin.command: helm repo add grafana https://grafana.github.io/helm-charts
+  register: repo_add_grafana
+  changed_when: "'has been added to your repositories' in repo_add_grafana.stdout"
+  failed_when: repo_add_grafana.rc != 0 and "already exists" not in repo_add_grafana.stderr
+
+- name: Update Helm repositories
+  ansible.builtin.command: helm repo update
+  register: repo_update
+  changed_when: repo_update.rc == 0
+
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    name: monitoring
+    api_version: v1
+    kind: Namespace
+    state: present
+  become: yes
+  environment:
+    KUBECONFIG: /

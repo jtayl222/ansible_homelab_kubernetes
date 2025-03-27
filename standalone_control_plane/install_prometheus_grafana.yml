@@ -1,0 +1,269 @@
+---
+- name: Install Prometheus and Grafana using Helm
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    prometheus_namespace: monitoring
+    prometheus_release_name: prometheus
+    grafana_release_name: grafana
+    node_ip: "{{ ansible_default_ipv4.address }}"
+    grafana_ingress_host: "grafana.{{ node_ip }}.nip.io"
+    grafana_admin_password: "admin"  # Change this in production
+
+  tasks:
+    - name: Create directory for manifests
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+
+    - name: Fetch kubeconfig from k3s server
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+      
+    - name: Update kubeconfig server address
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_path }}"
+        regexp: 'https://127.0.0.1:6443'
+        replace: 'https://{{ node_ip }}:6443'
+      delegate_to: localhost
+      become: false
+
+    - name: Create monitoring namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        name: "{{ prometheus_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: present
+      delegate_to: localhost
+      become: false
+
+    - name: Add Prometheus Helm repository
+      kubernetes.core.helm_repository:
+        name: prometheus-community
+        repo_url: https://prometheus-community.github.io/helm-charts
+        kubeconfig: "{{ kubeconfig_path }}"
+      delegate_to: localhost
+      become: false
+    
+    - name: Add Grafana Helm repository
+      kubernetes.core.helm_repository:
+        name: grafana
+        repo_url: https://grafana.github.io/helm-charts
+        kubeconfig: "{{ kubeconfig_path }}"
+      delegate_to: localhost
+      become: false
+
+    - name: Create Prometheus values file
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/prometheus-values.yaml"
+        content: |
+          alertmanager:
+            enabled: true
+          nodeExporter:
+            enabled: true
+          server:
+            persistentVolume:
+              enabled: false  # Disable PV for demo; enable with proper storage class in production
+          pushgateway:
+            enabled: true
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+
+    - name: Create Grafana values file with dashboard configuration
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-values.yaml"
+        content: |
+          adminPassword: {{ grafana_admin_password }}
+          persistence:
+            enabled: false  # Disable PV for demo; enable with proper storage class in production
+          ingress:
+            enabled: true
+            hosts:
+              - {{ grafana_ingress_host }}
+            path: /
+          plugins:
+            - grafana-piechart-panel
+          datasources:
+            datasources.yaml:
+              apiVersion: 1
+              datasources:
+              - name: Prometheus
+                type: prometheus
+                url: http://{{ prometheus_release_name }}-server.{{ prometheus_namespace }}.svc.cluster.local
+                access: proxy
+                isDefault: true
+          dashboardProviders:
+            dashboardproviders.yaml:
+              apiVersion: 1
+              providers:
+              - name: 'default'
+                orgId: 1
+                folder: ''
+                type: file
+                disableDeletion: false
+                editable: true
+                options:
+                  path: /var/lib/grafana/dashboards/default
+          dashboards:
+            default:
+              k8s-cluster-monitoring:
+                gnetId: 315  # Kubernetes cluster monitoring dashboard
+                revision: 3
+                datasource: Prometheus
+              node-exporter:
+                gnetId: 1860  # Node exporter dashboard
+                revision: 30
+                datasource: Prometheus
+              prometheus-stats:
+                gnetId: 2
+                revision: 2
+                datasource: Prometheus
+          service:
+            type: ClusterIP
+          grafana.ini:
+            server:
+              root_url: "%(protocol)s://%(domain)s/grafana/"
+              serve_from_sub_path: true
+        mode: '0644'
+      delegate_to: localhost
+      become: false
+
+    - name: Install Prometheus using Helm
+      kubernetes.core.helm:
+        name: "{{ prometheus_release_name }}"
+        chart_ref: prometheus-community/prometheus
+        chart_version: 15.10.1  # Specify version for stability
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        values_files:
+          - "{{ playbook_dir }}/fetched_tokens/prometheus-values.yaml"
+        wait: true
+      delegate_to: localhost
+      become: false
+
+    - name: Install Grafana using Helm
+      kubernetes.core.helm:
+        name: "{{ grafana_release_name }}"
+        chart_ref: grafana/grafana
+        chart_version: 6.40.3  # Specify version for stability
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        values_files:
+          - "{{ playbook_dir }}/fetched_tokens/grafana-values.yaml"
+        wait: true
+      delegate_to: localhost
+      become: false
+      
+    - name: Create Traefik IngressRoute for Grafana
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-ingressroute.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-route
+            namespace: {{ prometheus_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/grafana`) || PathPrefix(`/grafana/`)
+                kind: Rule
+                services:
+                  - name: {{ grafana_release_name }}
+                    port: 80
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply Grafana IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        src: "{{ playbook_dir }}/fetched_tokens/grafana-ingressroute.yaml"
+      delegate_to: localhost
+      become: false
+
+    # Fixed: Wait for Prometheus deployment to be ready
+    - name: Wait for Prometheus deployment to be ready
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" wait deployment/{{ prometheus_release_name }}-server 
+        --namespace={{ prometheus_namespace }} --for=condition=Available=True --timeout=300s
+      delegate_to: localhost
+      become: false
+      register: prometheus_ready
+      changed_when: false
+      retries: 5
+      delay: 10
+      until: prometheus_ready is succeeded
+
+    # Fixed: Wait for Grafana deployment to be ready
+    - name: Wait for Grafana deployment to be ready
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" wait deployment/{{ grafana_release_name }} 
+        --namespace={{ prometheus_namespace }} --for=condition=Available=True --timeout=300s
+      delegate_to: localhost
+      become: false
+      register: grafana_ready
+      changed_when: false
+      retries: 5
+      delay: 10
+      until: grafana_ready is succeeded
+
+    # Get the traefik service NodePort for accessing Grafana
+    - name: Get Traefik NodePort information
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get svc traefik -n kube-system 
+        -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+      delegate_to: localhost
+      become: false
+      register: traefik_nodeport
+      changed_when: false
+
+    # Get Grafana admin password from secret if not specified
+    - name: Get generated Grafana admin password if not specified
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get secret -n {{ prometheus_namespace }} {{ grafana_release_name }} 
+        -o jsonpath="{.data.admin-password}" | base64 --decode
+      delegate_to: localhost
+      become: false
+      register: grafana_password_result
+      changed_when: false
+      when: grafana_admin_password == "admin"
+      no_log: true
+
+    - name: Set actual password variable
+      set_fact:
+        actual_grafana_password: "{{ grafana_password_result.stdout | default(grafana_admin_password) }}"
+      when: grafana_password_result is defined
+      no_log: true
+      
+    - name: Set default password when not retrieved
+      set_fact:
+        actual_grafana_password: "{{ grafana_admin_password }}"
+      when: grafana_password_result is not defined or grafana_password_result.stdout | default('') == ''
+      no_log: true
+
+    - name: Display access information
+      debug:
+        msg:
+          - "=================================="
+          - "Prometheus and Grafana Installation Complete"
+          - "=================================="
+          - "Access Grafana:"
+          - "URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
+          - "Username: admin"
+          - "Password: {{ actual_grafana_password }}"
+          - ""
+          - "Monitoring namespace: {{ prometheus_namespace }}"
+          - "Grafana release: {{ grafana_release_name }}"
+          - "Prometheus release: {{ prometheus_release_name }}"
+          - "=================================="

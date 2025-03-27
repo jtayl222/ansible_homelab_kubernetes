@@ -1,0 +1,214 @@
+---
+- name: Fix Grafana 301 Redirect Issue
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    grafana_namespace: monitoring
+    grafana_release_name: grafana
+    traefik_namespace: kube-system
+    node_ip: "192.168.1.85"  # Using the known IP directly
+  
+  tasks:
+    - name: Create directory for manifests
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+    
+    - name: Get traefik port
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} get svc -n {{ traefik_namespace }} traefik 
+        -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+      register: traefik_port
+      delegate_to: localhost
+      become: false
+    
+    # Step 1: Add proper redirect middleware to handle trailing slashes
+    - name: Create Traefik redirect middleware
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-redirect-middleware.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: Middleware
+          metadata:
+            name: grafana-add-trailing-slash
+            namespace: {{ grafana_namespace }}
+          spec:
+            redirectRegex:
+              regex: ^(http://{{ node_ip }}:{{ traefik_port.stdout }}/grafana)$$
+              replacement: $${1}/
+              permanent: true
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply redirect middleware
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-redirect-middleware.yaml
+      delegate_to: localhost
+      become: false
+      
+    # Step 2: Create improved strip prefix middleware
+    - name: Create strip prefix middleware
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-strip-middleware.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: Middleware
+          metadata:
+            name: grafana-stripprefix
+            namespace: {{ grafana_namespace }}
+          spec:
+            stripPrefix:
+              prefixes:
+                - /grafana
+              forceSlash: true
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply strip middleware
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-strip-middleware.yaml
+      delegate_to: localhost
+      become: false
+      
+    # Step 3: Create comprehensive IngressRoute with middleware chain
+    - name: Create improved IngressRoute for Grafana
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-improved-route.yaml"
+        content: |
+          apiVersion: traefik.containo.us/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-route
+            namespace: {{ grafana_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              # Handle /grafana endpoint (add trailing slash)
+              - match: Path(`/grafana`)
+                kind: Rule
+                middlewares:
+                  - name: grafana-add-trailing-slash
+                services:
+                  - name: {{ grafana_release_name }}
+                    port: 80
+              
+              # Handle /grafana/ endpoint (strip prefix)
+              - match: PathPrefix(`/grafana/`)
+                kind: Rule
+                middlewares:
+                  - name: grafana-stripprefix
+                services:
+                  - name: {{ grafana_release_name }}
+                    port: 80
+      delegate_to: localhost
+      become: false
+      
+    - name: Apply improved IngressRoute
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-improved-route.yaml
+      delegate_to: localhost
+      become: false
+    
+    # Step 4: Update Grafana to handle subpaths correctly
+    - name: Create Grafana values for correct subpath handling
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-subpath-fix.yaml"
+        content: |
+          grafana.ini:
+            server:
+              domain: {{ node_ip }}
+              root_url: "http://{{ node_ip }}:{{ traefik_port.stdout }}/grafana/"
+              serve_from_sub_path: true
+          service:
+            type: ClusterIP
+      delegate_to: localhost
+      become: false
+    
+    - name: Update Grafana with corrected settings
+      command: >
+        helm --kubeconfig={{ kubeconfig_path }} upgrade {{ grafana_release_name }} 
+        grafana/grafana --namespace {{ grafana_namespace }} 
+        --values {{ playbook_dir }}/fetched_tokens/grafana-subpath-fix.yaml 
+        --reuse-values
+      delegate_to: localhost
+      become: false
+      
+    # Wait for Grafana to be ready
+    - name: Wait for Grafana to restart
+      command: >
+        kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment {{ grafana_release_name }} 
+        -n {{ grafana_namespace }}
+      delegate_to: localhost
+      become: false
+      
+    # Step 5: Create a robust test script
+    - name: Create enhanced test script
+      copy:
+        dest: "{{ playbook_dir }}/scripts/test_grafana_redirect.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          # Enhanced test script that handles redirects
+          
+          NODE_IP="{{ node_ip }}"
+          PORT="{{ traefik_port.stdout }}"
+          
+          echo "Testing Grafana access with redirect handling..."
+          echo "-------------------------------------------------"
+          
+          # Test with explicit trailing slash (should work directly)
+          echo "Testing /grafana/ (with trailing slash):"
+          RESP_CODE=$(curl -s -L -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/grafana/")
+          if [[ "$RESP_CODE" == "200" ]]; then
+            echo "✅ /grafana/ path works: HTTP $RESP_CODE"
+          else
+            echo "❌ /grafana/ path returned: HTTP $RESP_CODE"
+          fi
+          
+          # Test without trailing slash (should redirect)
+          echo
+          echo "Testing /grafana (without trailing slash):"
+          REDIRECT=$(curl -s -I "http://$NODE_IP:$PORT/grafana" | grep -i location)
+          RESP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/grafana")
+          
+          if [[ "$RESP_CODE" == "301" ]] && [[ "$REDIRECT" == *"/grafana/"* ]]; then
+            echo "✅ /grafana correctly redirects to /grafana/ (HTTP $RESP_CODE)"
+            echo "   $REDIRECT"
+          else
+            echo "❌ /grafana redirect not working properly: HTTP $RESP_CODE"
+          fi
+          
+          # Test with redirect following
+          echo
+          echo "Following redirects from /grafana to final destination:"
+          FINAL_CODE=$(curl -s -L -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/grafana")
+          if [[ "$FINAL_CODE" == "200" ]]; then
+            echo "✅ Final destination works after redirects: HTTP $FINAL_CODE"
+          else
+            echo "❌ Redirect chain not working: HTTP $FINAL_CODE" 
+          fi
+          
+          echo
+          echo "For manual testing, open: http://$NODE_IP:$PORT/grafana/"
+      delegate_to: localhost
+      become: false
+      
+    - name: Display next steps
+      debug:
+        msg:
+          - "Configuration updated to handle redirects properly!"
+          - "-----------------------------------------------------"
+          - "Run the enhanced test script:"
+          - "./scripts/test_grafana_redirect.sh"
+          - ""
+          - "Access Grafana at:"
+          - "http://{{ node_ip }}:{{ traefik_port.stdout }}/grafana/"
+          - "-----------------------------------------------------"
+      delegate_to: localhost
+      become: false
