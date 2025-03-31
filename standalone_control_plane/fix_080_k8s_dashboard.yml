@@ -1,0 +1,242 @@
+---
+# First play: Fix dashboard access on control plane
+- name: Fix Kubernetes Dashboard Access on Control Plane
+  hosts: k3s_control_plane
+  become: yes
+  vars:
+    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
+    dashboard_namespace: "kubernetes-dashboard"
+    dashboard_host: "dashboard.192.168.1.85.nip.io"
+    node_ip: "192.168.1.85"
+    
+  tasks:
+    - name: Check pod status
+      shell: kubectl get pods -n {{ dashboard_namespace }}
+      register: pods_status
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      changed_when: false
+
+    - name: Display pod status
+      debug:
+        var: pods_status.stdout_lines
+
+    - name: Create service middleware for HTTPS backends
+      copy:
+        dest: /tmp/dashboard-middlewares.yml
+        content: |
+          ---
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: dashboard-tls-passthrough
+            namespace: {{ dashboard_namespace }}
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: "https"
+          ---
+          apiVersion: traefik.io/v1alpha1
+          kind: ServersTransport
+          metadata:
+            name: dashboard-transport
+            namespace: {{ dashboard_namespace }}
+          spec:
+            serverName: "kubernetes-dashboard"
+            insecureSkipVerify: true
+                 
+    - name: Apply middlewares
+      shell: kubectl apply -f /tmp/dashboard-middlewares.yml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+      ignore_errors: true
+
+    - name: Create direct IngressRoute to web service
+      copy:
+        dest: /tmp/dashboard-direct-route.yml
+        content: |
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kubernetes-dashboard-web-route
+            namespace: {{ dashboard_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`{{ dashboard_host }}`)
+                kind: Rule
+                services:
+                  - name: kubernetes-dashboard-web
+                    port: 8000
+
+    - name: Apply direct web route
+      shell: kubectl apply -f /tmp/dashboard-direct-route.yml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Create NodePort service for direct access
+      copy:
+        dest: /tmp/dashboard-direct-access.yml
+        content: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: dashboard-direct-access
+            namespace: {{ dashboard_namespace }}
+          spec:
+            selector:
+              app.kubernetes.io/component: web
+              app.kubernetes.io/instance: kubernetes-dashboard
+            type: NodePort
+            ports:
+            - port: 8000
+              nodePort: 31000
+              targetPort: 8000
+
+    - name: Apply direct access service
+      shell: kubectl apply -f /tmp/dashboard-direct-access.yml
+      environment:
+        KUBECONFIG: "{{ kubeconfig_path }}"
+
+    - name: Fetch kubeconfig from control node
+      fetch:
+        src: "{{ kubeconfig_path }}" 
+        dest: /tmp/k8s-kubeconfig
+        flat: yes
+
+# Second play: Create helper scripts on utility server
+- name: Create Dashboard Helper Scripts on Utility Server
+  hosts: utility
+  become: no
+  vars:
+    dashboard_namespace: "kubernetes-dashboard"
+    dashboard_host: "dashboard.192.168.1.85.nip.io"
+    node_ip: "192.168.1.85"
+    scripts_dir: "/home/{{ ansible_user }}/ansible_homelab_kubernetes/standalone_control_plane/scripts"
+    kubeconfig_local: "/tmp/k8s-kubeconfig"
+    kubeconfig_remote: "/home/{{ ansible_user }}/ansible_homelab_kubernetes/standalone_control_plane/fetched_tokens/k3s-kubeconfig"
+    
+  tasks:
+    - name: Ensure scripts directory exists
+      file:
+        path: "{{ scripts_dir }}"
+        state: directory
+        mode: '0755'
+      
+    - name: Ensure fetched_tokens directory exists
+      file:
+        path: "/home/{{ ansible_user }}/ansible_homelab_kubernetes/standalone_control_plane/fetched_tokens"
+        state: directory
+        mode: '0755'
+      
+    - name: Copy kubeconfig to utility server
+      copy:
+        src: "{{ kubeconfig_local }}"
+        dest: "{{ kubeconfig_remote }}"
+        mode: '0600'
+
+    - name: Fix kubeconfig server address
+      replace:
+        path: "{{ kubeconfig_remote }}"
+        regexp: 'https://127.0.0.1:6443'
+        replace: 'https://{{ node_ip }}:6443'
+
+    - name: Create dashboard access helper script
+      copy:
+        dest: "{{ scripts_dir }}/access-dashboard.sh" 
+        mode: 0755
+        content: |
+          #!/bin/bash
+          NODE_IP="{{ node_ip }}"
+          HOST="{{ dashboard_host }}"
+          KUBECONFIG="{{ kubeconfig_remote }}"
+          
+          echo "===== Kubernetes Dashboard Access Options ====="
+          echo "1. Via Ingress:     http://${HOST}"
+          echo "2. Via NodePort:    http://${NODE_IP}:31000"
+          echo "3. Via Port-Forward: http://localhost:8080"
+          echo
+          echo "Choose an option (1-3) or press Enter to try all:"
+          read -r choice
+          
+          case "$choice" in
+            1)
+              echo "Opening dashboard via Ingress..."
+              xdg-open "http://${HOST}" 2>/dev/null || open "http://${HOST}" 2>/dev/null || echo "Navigate to http://${HOST}"
+              ;;
+            2)
+              echo "Opening dashboard via NodePort..."
+              xdg-open "http://${NODE_IP}:31000" 2>/dev/null || open "http://${NODE_IP}:31000" 2>/dev/null || echo "Navigate to http://${NODE_IP}:31000"
+              ;;
+            3)
+              echo "Starting port-forward in background..."
+              kubectl --kubeconfig=$KUBECONFIG port-forward -n kubernetes-dashboard svc/kubernetes-dashboard-web 8080:8000 &
+              PF_PID=$!
+              echo "Port-forward started (PID: $PF_PID)"
+              echo "Press Ctrl+C to stop when finished"
+              sleep 2
+              xdg-open "http://localhost:8080" 2>/dev/null || open "http://localhost:8080" 2>/dev/null || echo "Navigate to http://localhost:8080"
+              echo "Press Enter to stop port-forwarding"
+              read
+              kill $PF_PID
+              ;;
+            *)
+              echo "Trying all access methods..."
+              echo "1. Via Ingress: http://${HOST}"
+              echo "2. Via NodePort: http://${NODE_IP}:31000"
+              echo "3. Starting port-forward..."
+              kubectl --kubeconfig=$KUBECONFIG port-forward -n kubernetes-dashboard svc/kubernetes-dashboard-web 8080:8000 &
+              PF_PID=$!
+              echo "Port-forward started (PID: $PF_PID)"
+              echo "Access dashboard at: http://localhost:8080"
+              echo "Press Enter to stop port-forwarding"
+              read
+              kill $PF_PID
+              ;;
+          esac
+
+    - name: Create dashboard token helper script
+      copy:
+        dest: "{{ scripts_dir }}/dashboard-token.sh" 
+        mode: 0755
+        content: |
+          #!/bin/bash
+          NAMESPACE="kubernetes-dashboard"
+          KUBECONFIG="{{ kubeconfig_remote }}"
+          
+          echo "Creating service account for dashboard access..."
+          kubectl --kubeconfig=$KUBECONFIG create serviceaccount dashboard-admin -n $NAMESPACE
+          
+          echo "Creating cluster role binding..."
+          kubectl --kubeconfig=$KUBECONFIG create clusterrolebinding dashboard-admin \
+            --clusterrole=cluster-admin \
+            --serviceaccount=$NAMESPACE:dashboard-admin
+          
+          echo "Creating token..."
+          TOKEN=$(kubectl --kubeconfig=$KUBECONFIG create token dashboard-admin -n $NAMESPACE)
+          
+          echo "============================================"
+          echo "Dashboard Access Token (Valid for 1 hour):"
+          echo "============================================"
+          echo "$TOKEN"
+          echo "============================================"
+          echo "Copy this token when prompted by the dashboard login screen."
+
+    - name: Display access information
+      debug:
+        msg:
+          - "======================================================="
+          - "Kubernetes Dashboard Access Information"
+          - "======================================================="
+          - "Access Methods:"
+          - "1. Via Ingress: http://{{ dashboard_host }}"
+          - "2. Via NodePort: http://{{ node_ip }}:31000"
+          - "3. Via Port-Forward: Run the access script"
+          - ""
+          - "Access Scripts:"
+          - "./scripts/access-dashboard.sh   # To access the dashboard"
+          - "./scripts/dashboard-token.sh    # To generate a login token"
+          - ""
+          - "Note: If one access method doesn't work, try another one."
+          - "======================================================="
