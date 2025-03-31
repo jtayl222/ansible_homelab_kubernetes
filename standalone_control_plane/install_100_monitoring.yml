@@ -1,0 +1,317 @@
+---
+- name: Enhance Prometheus and Grafana Monitoring Setup
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    prometheus_namespace: monitoring
+    prometheus_release_name: prometheus
+    grafana_release_name: prometheus-grafana  # This is the default name from kube-prometheus-stack
+    node_ip: "{{ ansible_default_ipv4.address }}"
+    traefik_namespace: kube-system
+    
+  tasks:
+    # Verify prerequisites
+    - name: Ensure directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ playbook_dir }}/fetched_tokens"
+        - "{{ playbook_dir }}/scripts"
+      delegate_to: localhost
+      become: false
+
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      delegate_to: localhost
+      become: false
+
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found. Please run install_090_prometheus_grafana.yml first."
+      when: not kubeconfig_stat.stat.exists
+      delegate_to: localhost
+      become: false
+
+    # Verify that Prometheus and Grafana are running
+    - name: Verify Grafana and Prometheus are running
+      kubernetes.core.k8s_info:
+        kind: Deployment
+        name: "{{ item }}"
+        namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      loop:
+        - "{{ grafana_release_name }}"
+        - "prometheus-kube-prometheus-operator"  # This is the operator deployment from kube-prometheus-stack
+      register: deployments
+      delegate_to: localhost
+      become: false
+      failed_when: 
+        - deployments.resources is defined 
+        - deployments.resources | length == 0
+
+    # Create a custom dashboard for K3s Pod Monitoring
+    - name: Create additional dashboards ConfigMap
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
+        content: |
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: additional-dashboards
+            namespace: {{ prometheus_namespace }}
+            labels:
+              grafana_dashboard: "1"
+          data:
+            k3s-monitoring-dashboard.json: |-
+              {
+                "annotations": {
+                  "list": [
+                    {
+                      "builtIn": 1,
+                      "datasource": "-- Grafana --",
+                      "enable": true,
+                      "hide": true,
+                      "iconColor": "rgba(0, 211, 255, 1)",
+                      "name": "Annotations & Alerts",
+                      "type": "dashboard"
+                    }
+                  ]
+                },
+                "editable": true,
+                "gnetId": null,
+                "graphTooltip": 0,
+                "id": null,
+                "title": "K3s Pod Monitoring",
+                "uid": "YLiYBfCGk",
+                "version": 1,
+                "panels": [
+                  {
+                    "title": "CPU Usage",
+                    "type": "graph",
+                    "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+                    "id": 4,
+                    "targets": [
+                      {
+                        "expr": "sum(rate(container_cpu_usage_seconds_total{container!=\"POD\", pod=~\"$pod\"}[5m])) by (container)",
+                        "legendFormat": "{{ "{{" }} container {{ "}}" }}",
+                        "refId": "A"
+                      }
+                    ],
+                    "yaxes": [{"format": "short"}, {"format": "short"}]
+                  },
+                  {
+                    "title": "Memory Usage",
+                    "type": "graph",
+                    "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+                    "id": 6,
+                    "targets": [
+                      {
+                        "expr": "sum(container_memory_usage_bytes{container!=\"POD\", pod=~\"$pod\"}) by (container)",
+                        "legendFormat": "{{ "{{" }} container {{ "}}" }}",
+                        "refId": "A"
+                      }
+                    ],
+                    "yaxes": [{"format": "bytes"}, {"format": "short"}]
+                  },
+                  {
+                    "title": "Network Traffic",
+                    "type": "graph",
+                    "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+                    "id": 8,
+                    "targets": [
+                      {
+                        "expr": "sum(rate(container_network_receive_bytes_total{pod=~\"$pod\"}[5m])) by (pod)",
+                        "legendFormat": "{{ "{{" }} pod {{ "}}" }} - Received",
+                        "refId": "A"
+                      },
+                      {
+                        "expr": "sum(rate(container_network_transmit_bytes_total{pod=~\"$pod\"}[5m])) by (pod)",
+                        "legendFormat": "{{ "{{" }} pod {{ "}}" }} - Transmitted",
+                        "refId": "B"
+                      }
+                    ],
+                    "yaxes": [{"format": "bytes"}, {"format": "short"}]
+                  }
+                ],
+                "templating": {
+                  "list": [
+                    {
+                      "name": "namespace",
+                      "type": "query",
+                      "datasource": "Prometheus",
+                      "query": "label_values(kube_pod_info, namespace)"
+                    },
+                    {
+                      "name": "pod",
+                      "type": "query",
+                      "datasource": "Prometheus",
+                      "query": "label_values(kube_pod_info{namespace=~\"$namespace\"}, pod)",
+                      "includeAll": true
+                    }
+                  ]
+                },
+                "time": {"from": "now-6h", "to": "now"}
+              }
+      delegate_to: localhost
+      become: false
+
+    - name: Apply additional dashboards ConfigMap
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        src: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
+      delegate_to: localhost
+      become: false
+
+    # Create custom alerts
+    - name: Create Custom Prometheus Rules
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
+        content: |
+          apiVersion: monitoring.coreos.com/v1
+          kind: PrometheusRule
+          metadata:
+            name: custom-k3s-alerts
+            namespace: {{ prometheus_namespace }}
+            labels:
+              app: kube-prometheus-stack
+              release: prometheus
+          spec:
+            groups:
+            - name: node.rules
+              rules:
+              - alert: HighNodeCPU
+                expr: 100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: High CPU usage on {{ "{{" }} $labels.instance {{ "}}" }}
+                  description: "CPU usage is above 80% for 5 minutes.\nValue: {{ "{{" }} $value {{ "}}" }}%"
+              - alert: HighNodeMemory
+                expr: (node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100 > 80
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: High memory usage on {{ "{{" }} $labels.instance {{ "}}" }}
+                  description: "Memory usage is above 80% for 5 minutes.\nValue: {{ "{{" }} $value {{ "}}" }}%"
+              - alert: HighNodeDiskUsage
+                expr: (node_filesystem_size_bytes - node_filesystem_avail_bytes) / node_filesystem_size_bytes * 100 > 80
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: High disk usage on {{ "{{" }} $labels.instance {{ "}}" }}:{{ "{{" }} $labels.mountpoint {{ "}}" }}
+                  description: "Disk usage is above 80% for 5 minutes.\nValue: {{ "{{" }} $value {{ "}}" }}%"
+      delegate_to: localhost
+      become: false
+
+    - name: Apply Custom Prometheus Rules
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        src: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
+      delegate_to: localhost
+      become: false
+
+    # Get information for access scripts
+    - name: Get Traefik NodePort information
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get svc traefik -n {{ traefik_namespace }} 
+        -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+      delegate_to: localhost
+      become: false
+      register: traefik_nodeport
+      changed_when: false
+
+    - name: Get Grafana admin password
+      shell: >
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get secret -n {{ prometheus_namespace }} prometheus-grafana 
+        -o jsonpath="{.data.admin-password}" | base64 --decode
+      delegate_to: localhost
+      become: false
+      register: grafana_password
+      changed_when: false
+      no_log: true
+
+    # Create monitoring access script
+    - name: Create monitoring access script
+      copy:
+        dest: "{{ playbook_dir }}/scripts/access_monitoring.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          
+          KUBECONFIG="{{ kubeconfig_path }}"
+          NODE_IP="{{ node_ip }}"
+          TRAEFIK_PORT="{{ traefik_nodeport.stdout }}"
+          GRAFANA_PASSWORD="{{ grafana_password.stdout }}"
+          
+          echo "========== Kubernetes Monitoring Stack =========="
+          echo
+          echo "Grafana:"
+          echo "  URL: http://$NODE_IP:$TRAEFIK_PORT/grafana"
+          echo "  Username: admin"
+          echo "  Password: $GRAFANA_PASSWORD"
+          echo
+          echo "Prometheus:"
+          echo "  URL: http://$NODE_IP:$TRAEFIK_PORT/prometheus"
+          echo
+          echo "Alertmanager:"
+          echo "  URL: http://$NODE_IP:$TRAEFIK_PORT/alertmanager"
+          echo
+          echo "=============================================="
+          echo
+          echo "Interesting Dashboards:"
+          echo "1. K3s Pod Monitoring (custom)"
+          echo "2. Node Exporter / Full"
+          echo "3. Kubernetes / API server"
+          echo "4. Kubernetes / Compute Resources / Cluster"
+          echo "5. Kubernetes / Compute Resources / Namespace (Pods)"
+          echo "6. Kubernetes / Compute Resources / Workload"
+          echo
+          echo "To port-forward services directly:"
+          echo
+          echo "Grafana: kubectl --kubeconfig=$KUBECONFIG -n {{ prometheus_namespace }} port-forward svc/prometheus-grafana 3000:80"
+          echo "Prometheus: kubectl --kubeconfig=$KUBECONFIG -n {{ prometheus_namespace }} port-forward svc/prometheus-kube-prometheus-prometheus 9090:9090"
+          echo
+          
+          # Open Grafana in the default browser
+          echo "Opening Grafana in your browser..."
+          xdg-open "http://$NODE_IP:$TRAEFIK_PORT/grafana" 2>/dev/null || \
+          open "http://$NODE_IP:$TRAEFIK_PORT/grafana" 2>/dev/null || \
+          echo "Please open http://$NODE_IP:$TRAEFIK_PORT/grafana manually"
+      delegate_to: localhost
+      become: false
+
+    # Final status message
+    - name: Display monitoring information
+      debug:
+        msg:
+          - "=========================================================================================="
+          - "                         Monitoring Enhancement Complete                                   "
+          - "=========================================================================================="
+          - "Additional dashboards have been added to Grafana and basic alerts configured."
+          - ""
+          - "Access all monitoring components using the script:"
+          - "./scripts/access_monitoring.sh"
+          - ""
+          - "Grafana URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
+          - "Grafana username: admin"
+          - "Grafana password: {{ grafana_password.stdout }}"
+          - ""
+          - "New dashboard added:"
+          - "- K3s Pod Monitoring (custom)"
+          - ""
+          - "Basic alerts configured for:"
+          - "- High CPU usage (>80% for 5 minutes)"
+          - "- High Memory usage (>80% for 5 minutes)"
+          - "- High Disk usage (>80% for 5 minutes)"
+          - "=========================================================================================="
