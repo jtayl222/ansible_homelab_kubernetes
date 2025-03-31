@@ -1,0 +1,58 @@
+---
+# Kubernetes Dashboard Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kubernetes-dashboard
+  namespace: kubernetes-dashboard
+  annotations:
+    kubernetes.io/ingress.class: traefik
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  rules:
+    - host: dashboard.{{ ansible_default_ipv4.address }}.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kubernetes-dashboard-web
+                port:
+                  number: 8000
+
+---
+# Alternative Traefik IngressRoute (if you prefer)
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kubernetes-dashboard-route
+  namespace: kubernetes-dashboard
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: Host(`dashboard.{{ node_ip }}.nip.io`)
+      kind: Rule
+      services:
+        - name: kubernetes-dashboard
+          port: 443
+          scheme: https
+      middlewares:
+        - name: dashboard-headers
+  tls:
+    options:
+      name: dashboard-tls-options
+      namespace: kubernetes-dashboard
+
+---
+# Custom headers middleware for Dashboard
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: dashboard-headers
+  namespace: kubernetes-dashboard
+spec:
+  headers:
+    customRequestHeaders:
+      X-Forwarded-Proto: "https"

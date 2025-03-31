@@ -1,0 +1,61 @@
+---
+- name: Configure NFS server on utility node
+  hosts: nfs_server
+  become: true
+  gather_facts: true
+  tasks:
+    - name: Install NFS server packages
+      apt:
+        name:
+          - nfs-kernel-server
+        state: present
+        update_cache: yes
+
+    - name: Create NFS export directory
+      file:
+        path: "/srv/nfs/kubernetes"
+        state: directory
+        mode: '0777'
+        owner: nobody
+        group: nogroup
+        recurse: yes
+
+    - name: Create a subdirectory for Grafana data
+      file:
+        path: "/srv/nfs/kubernetes/grafana"
+        state: directory
+        mode: '0777'
+        owner: nobody
+        group: nogroup
+
+    - name: Configure exports file
+      lineinfile:
+        path: /etc/exports
+        line: '/srv/nfs/kubernetes 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)'
+        create: yes
+      register: exports_config
+
+    - name: Apply NFS export configuration
+      command: exportfs -ra
+      when: exports_config.changed
+
+    - name: Start and enable NFS server
+      systemd:
+        name: nfs-server
+        state: restarted
+        enabled: yes
+
+    # Check if ufw is installed first
+    - name: Check if ufw is installed
+      command: which ufw
+      register: ufw_check
+      failed_when: false
+      changed_when: false
+
+    # Only run if ufw is installed
+    - name: Allow NFS through firewall
+      ufw:
+        rule: allow
+        port: nfs
+      when: ufw_check.rc == 0
+      ignore_errors: yes

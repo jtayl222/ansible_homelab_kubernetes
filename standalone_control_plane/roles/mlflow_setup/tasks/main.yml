@@ -1,0 +1,246 @@
+---
+- name: Create MLflow namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    kind: Namespace
+    name: "{{ mlflow_namespace }}"
+  delegate_to: localhost
+  become: false
+
+- name: Create MLflow ConfigMap
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: "{{ mlflow_release_name }}-config"
+        namespace: "{{ mlflow_namespace }}"
+      data:
+        MLFLOW_ARTIFACT_ROOT: "{{ mlflow_artifact_root }}"
+        MLFLOW_BACKEND_STORE_URI: "{{ mlflow_backend_store_uri }}"
+        MLFLOW_HOST: "0.0.0.0"
+        MLFLOW_PORT: "{{ mlflow_service_port | string }}"  # Convert to string
+  delegate_to: localhost
+  become: false
+
+- name: Create MLflow PVC if enabled
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: "{{ mlflow_release_name }}-data"
+        namespace: "{{ mlflow_namespace }}"
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: "{{ mlflow_storage_size }}"
+        storageClassName: "{{ mlflow_storage_class }}"
+  delegate_to: localhost
+  become: false
+  when: mlflow_persistent_volume | bool
+
+# Create deployment with PVC when persistent storage is enabled
+- name: Create MLflow Deployment with persistent storage
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ mlflow_release_name }}"
+        namespace: "{{ mlflow_namespace }}"
+        labels:
+          app: "{{ mlflow_release_name }}"
+      spec:
+        replicas: "{{ mlflow_replicas }}"
+        selector:
+          matchLabels:
+            app: "{{ mlflow_release_name }}"
+        template:
+          metadata:
+            labels:
+              app: "{{ mlflow_release_name }}"
+          spec:
+            containers:
+              - name: mlflow
+                image: "{{ mlflow_image }}"
+                imagePullPolicy: IfNotPresent
+                command: "{{ mlflow_command }}"
+                ports:
+                  - containerPort: "{{ mlflow_service_port }}"
+                    name: http
+                resources:
+                  requests:
+                    memory: "{{ mlflow_memory_request }}"
+                    cpu: "{{ mlflow_cpu_request }}"
+                  limits:
+                    memory: "{{ mlflow_memory_limit }}"
+                    cpu: "{{ mlflow_cpu_limit }}"
+                volumeMounts:
+                  - name: data
+                    mountPath: "/mnt/mlflow"
+            volumes:
+              - name: data
+                persistentVolumeClaim:
+                  claimName: "{{ mlflow_release_name }}-data"
+  delegate_to: localhost
+  become: false
+  when: mlflow_persistent_volume | bool
+
+# Create deployment with emptyDir when persistent storage is not enabled
+- name: Create MLflow Deployment with emptyDir
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: "{{ mlflow_release_name }}"
+        namespace: "{{ mlflow_namespace }}"
+        labels:
+          app: "{{ mlflow_release_name }}"
+      spec:
+        replicas: "{{ mlflow_replicas }}"
+        selector:
+          matchLabels:
+            app: "{{ mlflow_release_name }}"
+        template:
+          metadata:
+            labels:
+              app: "{{ mlflow_release_name }}"
+          spec:
+            containers:
+              - name: mlflow
+                image: "{{ mlflow_image }}"
+                imagePullPolicy: IfNotPresent
+                command: "{{ mlflow_command }}"
+                ports:
+                  - containerPort: "{{ mlflow_service_port }}"
+                    name: http
+                resources:
+                  requests:
+                    memory: "{{ mlflow_memory_request }}"
+                    cpu: "{{ mlflow_cpu_request }}"
+                  limits:
+                    memory: "{{ mlflow_memory_limit }}"
+                    cpu: "{{ mlflow_cpu_limit }}"
+                volumeMounts:
+                  - name: data
+                    mountPath: "/mnt/mlflow"
+            volumes:
+              - name: data
+                emptyDir: {}
+  delegate_to: localhost
+  become: false
+  when: not mlflow_persistent_volume | bool
+
+- name: Create MLflow Service
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: "{{ mlflow_release_name }}"
+        namespace: "{{ mlflow_namespace }}"
+        labels:
+          app: "{{ mlflow_release_name }}"
+      spec:
+        type: "{{ mlflow_service_type }}"
+        ports:
+          - port: "{{ mlflow_service_port }}"
+            targetPort: http
+            protocol: TCP
+            name: http
+        selector:
+          app: "{{ mlflow_release_name }}"
+  delegate_to: localhost
+  become: false
+
+- name: Create MLflow Traefik IngressRoute
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: 
+      apiVersion: traefik.containo.us/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: "{{ mlflow_release_name }}-route"
+        namespace: "{{ mlflow_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: "Host(`{{ mlflow_ingress_host }}`)"
+            kind: Rule
+            services:
+              - name: "{{ mlflow_release_name }}"
+                port: "{{ mlflow_service_port }}"
+  delegate_to: localhost
+  become: false
+  when: mlflow_ingress_enabled | bool
+
+- name: Create MLflow strip prefix middleware
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.containo.us/v1alpha1
+      kind: Middleware
+      metadata:
+        name: "{{ mlflow_release_name }}-stripprefix"
+        namespace: "{{ mlflow_namespace }}"
+      spec:
+        stripPrefix:
+          prefixes:
+            - /mlflow
+  delegate_to: localhost
+  become: false
+
+- name: Create MLflow path-based IngressRoute
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition: 
+      apiVersion: traefik.containo.us/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: "{{ mlflow_release_name }}-path-route"
+        namespace: "{{ mlflow_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: "PathPrefix(`/mlflow`)"
+            kind: Rule
+            middlewares:
+              - name: "{{ mlflow_release_name }}-stripprefix"
+            services:
+              - name: "{{ mlflow_release_name }}"
+                port: "{{ mlflow_service_port }}"
+  delegate_to: localhost
+  become: false
+
+- name: Wait for MLflow deployment to be ready
+  shell: >
+    kubectl --kubeconfig="{{ kubeconfig_path }}" wait deployment/{{ mlflow_release_name }} 
+    --namespace={{ mlflow_namespace }} --for=condition=Available=True --timeout=300s
+  delegate_to: localhost
+  become: false
+  register: mlflow_ready
+  changed_when: false
+  retries: 5
+  delay: 10
+  until: mlflow_ready is succeeded
+  ignore_errors: true

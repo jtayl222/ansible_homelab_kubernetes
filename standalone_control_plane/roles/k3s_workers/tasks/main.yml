@@ -5,7 +5,7 @@
   args:
     creates: /etc/rancher/k3s/k3s.yaml
   register: k3s_install
-  when: inventory_hostname in groups['k3s_worker'] and inventory_hostname not in groups['k3s_control_plane']
+  when: inventory_hostname in groups['k3s_workers'] and inventory_hostname not in groups['k3s_control_plane']
 
 - name: Ensure k3s service is running
   ansible.builtin.systemd:

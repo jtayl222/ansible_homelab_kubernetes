@@ -1,0 +1,266 @@
+---
+- name: Install Traefik and expose the dashboard
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    traefik_namespace: kube-system
+    node_ip: "{{ ansible_default_ipv4.address }}"
+    dashboard_subdomain: "traefik"
+    
+  tasks:
+    - name: Create directory for fetched tokens
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+
+    - name: Create scripts directory
+      file:
+        path: "{{ playbook_dir }}/scripts"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+
+    - name: Fetch kubeconfig from k3s
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+
+    - name: Update kubeconfig to use node IP
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_path }}"
+        regexp: 'https://127.0.0.1:6443'
+        replace: 'https://{{ node_ip }}:6443'
+      delegate_to: localhost
+
+    - name: Get Traefik nodePort
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} get svc traefik -n {{ traefik_namespace }}
+        -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+      register: traefik_port
+      delegate_to: localhost
+      changed_when: false
+
+    - name: Ensure Traefik CRDs exist
+      block:
+        - name: Check for Traefik CRDs
+          shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
+          register: crd_check
+          changed_when: false
+          delegate_to: localhost
+
+        - name: Download CRDs
+          get_url:
+            url: https://raw.githubusercontent.com/traefik/traefik/v2.10/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
+            dest: /tmp/traefik-crds.yaml
+          when: "'NO_CRD' in crd_check.stdout"
+          delegate_to: localhost
+
+        - name: Apply CRDs
+          shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-crds.yaml
+          when: "'NO_CRD' in crd_check.stdout"
+          delegate_to: localhost
+
+    - name: Create HelmChartConfig to enable dashboard
+      copy:
+        dest: /tmp/traefik-helm-config.yaml
+        content: |
+          apiVersion: helm.cattle.io/v1
+          kind: HelmChartConfig
+          metadata:
+            name: traefik
+            namespace: {{ traefik_namespace }}
+          spec:
+            valuesContent: |-
+              dashboard:
+                enabled: true
+              additionalArguments:
+                - "--api.insecure=true"
+              ports:
+                web:
+                  redirectTo: ""
+                websecure:
+                  tls:
+                    enabled: false
+      delegate_to: localhost
+
+    - name: Apply HelmChartConfig
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-helm-config.yaml
+      delegate_to: localhost
+
+    - name: Create basic auth secret
+      copy:
+        dest: /tmp/traefik-auth-secret.yaml
+        content: |
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: traefik-dashboard-auth
+            namespace: {{ traefik_namespace }}
+          type: Opaque
+          stringData:
+            # Updated using: htpasswd -nb admin admin
+            users: "admin:$apr1$QER2W2Ka$avgZMvXUgMlrFgg4tCJDW0"
+      delegate_to: localhost
+
+    - name: Apply basic auth secret
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-auth-secret.yaml
+      delegate_to: localhost
+
+    - name: Create auth middleware
+      copy:
+        dest: /tmp/traefik-middleware.yaml
+        content: |
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: traefik-dashboard-auth
+            namespace: {{ traefik_namespace }}
+          spec:
+            basicAuth:
+              secret: traefik-dashboard-auth
+              realm: "Traefik Dashboard"
+      delegate_to: localhost
+
+    - name: Apply auth middleware
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-middleware.yaml
+      delegate_to: localhost
+
+    - name: Create strip prefix middleware
+      copy:
+        dest: /tmp/traefik-strip-prefix.yaml
+        content: |
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: strip-dashboard-prefix
+            namespace: {{ traefik_namespace }}
+          spec:
+            stripPrefix:
+              prefixes:
+                - /dashboard
+              forceSlash: true
+      delegate_to: localhost
+
+    - name: Apply strip prefix middleware
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-strip-prefix.yaml
+      delegate_to: localhost
+
+    - name: Create dashboard IngressRoute
+      copy:
+        dest: /tmp/traefik-dashboard-route.yaml
+        content: |
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: traefik-dashboard
+            namespace: {{ traefik_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`{{ dashboard_subdomain }}.{{ node_ip }}.nip.io`) && PathPrefix(`/dashboard`)
+                kind: Rule
+                services:
+                  - name: api@internal
+                    kind: TraefikService
+                middlewares:
+                  - name: traefik-dashboard-auth
+                  - name: strip-dashboard-prefix
+      delegate_to: localhost
+
+    - name: Apply dashboard route
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-dashboard-route.yaml
+      delegate_to: localhost
+
+    - name: Create direct IngressRoute
+      copy:
+        dest: /tmp/traefik-direct-dashboard-route.yaml
+        content: |
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: traefik-dashboard-direct
+            namespace: {{ traefik_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/dashboard`)
+                kind: Rule
+                services:
+                  - name: api@internal
+                    kind: TraefikService
+                middlewares:
+                  - name: traefik-dashboard-auth
+                  - name: strip-dashboard-prefix
+      delegate_to: localhost
+
+    - name: Apply direct route
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-direct-dashboard-route.yaml
+      delegate_to: localhost
+
+    - name: Restart Traefik
+      block:
+        - name: Rollout restart
+          shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} rollout restart deployment traefik -n {{ traefik_namespace }}
+          delegate_to: localhost
+
+        - name: Wait for Traefik to be ready
+          shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik -n {{ traefik_namespace }} --timeout=60s
+          delegate_to: localhost
+      rescue:
+        - name: Show deployment state
+          shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }}
+          delegate_to: localhost
+          register: deployment_check
+
+        - name: Display partial state
+          debug:
+            msg: "Traefik deployment timed out. Current: {{ deployment_check.stdout_lines }}"
+
+    - name: Pause for changes
+      pause:
+        seconds: 20
+      delegate_to: localhost
+
+    - name: Create port-forward script
+      copy:
+        dest: "{{ playbook_dir }}/scripts/dashboard.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          KUBECONFIG="{{ kubeconfig_path }}"
+          
+          echo "Starting port-forward to Traefik..."
+          echo "Use http://localhost:9000/dashboard/"
+          echo "Username: admin"
+          echo "Password: admin"
+          kubectl --kubeconfig=$KUBECONFIG port-forward -n kube-system svc/traefik 9000:80 &
+          PF_PID=$!
+          sleep 3
+          xdg-open "http://localhost:9000/dashboard/" 2>/dev/null || open "http://localhost:9000/dashboard/" 2>/dev/null || echo "Open http://localhost:9000/dashboard/ manually"
+          wait $PF_PID
+      delegate_to: localhost
+
+    - name: Final message
+      debug:
+        msg:
+          - "Dashboard URL: http://{{ node_ip }}:{{ traefik_port.stdout }}/dashboard/ (admin/admin)"
+          - "If you see 401, ensure you used the correct credentials from htpasswd."
+          - "Or use port-forward: ./scripts/dashboard.sh"

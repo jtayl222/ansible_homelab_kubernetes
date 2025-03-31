@@ -1,0 +1,37 @@
+- name: Setup K3s Control Plane
+  import_playbook: install_020_k3s_control_plane.yml
+
+- name: Setup K3s Worker Nodes
+  import_playbook: install_030_k3s_workers.yml
+
+- name: Configure NFS Storage
+  import_playbook: install_040_nfs_server.yml
+
+- name: Configure NFS Storage
+  import_playbook: install_050_nfs_clients.yml
+
+- name: Configure NFS Storage
+  import_playbook: install_060_nfs_provisioner.yml
+
+- name: Deploy Traefik
+  import_playbook: install_070_traefik.yml
+
+# - name: Deploy Kubernetes Dashboard
+#   import_playbook: install_080_k8s_dashboard.yml
+
+# - name: Deploy Monitoring Stack
+#   import_playbook: install_07_prometheus.yml
+#   import_playbook: install_08_grafana.yml
+
+# - name: Deploy MLflow
+#   import_playbook: install_09_mlflow.yml
+
+# - name: Deploy ELK Stack
+#   import_playbook: install_10_elk.yml
+
+# - name: Additional Configurations
+#   hosts: all
+#   become: yes
+#   tasks:
+#     - name: Configure custom dashboards and alerts
+#       # Add tasks for custom configurations
