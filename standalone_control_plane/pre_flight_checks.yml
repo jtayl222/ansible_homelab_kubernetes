@@ -44,7 +44,7 @@
         - 10250 # Kubelet API
         - 30000 # NodePort services start
         - 32767 # NodePort services end
-      when: "'k3s_worker' in group_names"
+      when: "'k3s_workers' in group_names"
       ignore_errors: true
       register: worker_ports
 
@@ -58,7 +58,7 @@
           - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}
           {% endfor %}
           {% endif %}
-          {% if 'k3s_worker' in group_names %}
+          {% if 'k3s_workers' in group_names %}
           Worker ports:
           {% for result in worker_ports.results %}
           - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}

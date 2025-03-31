@@ -1,4 +1,3 @@
-
 # Kubernetes Homelab Setup with K3s, NFS, Prometheus, and Grafana
 
 This repository contains Ansible playbooks to deploy and manage a lightweight Kubernetes cluster using K3s in a homelab environment. The setup includes NFS for persistent storage, Prometheus and Grafana for monitoring, and Traefik for ingress routing. These playbooks automate the installation, configuration, testing, and cleanup of the cluster and its components.
@@ -100,6 +99,40 @@ For a fresh install of the K3s cluster with NFS, Prometheus, and Grafana:
 ### Post-Install Testing
 - Validate storage: `ansible-playbook -i inventory/my_inventory.yml test_nfs_pvc.yml`
 - Check Grafana: `ansible-playbook -i inventory/my_inventory.yml test_grafana_config.yml`
+
+## MLflow Installation
+
+This repository includes playbooks to deploy MLflow, a platform for the machine learning lifecycle.
+
+### Installation
+
+1. Install MLflow:
+   ```bash
+   ansible-playbook -i inventory/my_inventory.yml install_mlflow.yml
+   ```
+
+2. Clean up MLflow if needed:
+   ```bash
+   ansible-playbook -i inventory/my_inventory.yml cleanup_mlflow.yml
+   ```
+
+### MLflow Configuration
+
+MLflow is configured with default settings that should work for most homelab environments. 
+You can customize the following variables in `group_vars/all.yml`:
+
+```yaml
+# MLflow Configuration
+mlflow_namespace: mlflow
+mlflow_release_name: mlflow
+mlflow_image: "ghcr.io/mlflow/mlflow:v2.10.2"
+mlflow_replicas: 1
+mlflow_persistent_volume: true
+mlflow_storage_size: "10Gi"
+mlflow_storage_class: "nfs-client"  # Use your cluster's storage class
+```
+
+Once deployed, MLflow will be available at: `http://mlflow.<node-ip>.nip.io`
 
 ## Customization
 

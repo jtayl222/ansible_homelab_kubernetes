@@ -59,14 +59,14 @@
         timeout: 300
         
 - name: Set up K3s workers
-  hosts: k3s_worker
+  hosts: k3s_workers
   become: true
   gather_facts: true
   vars:
     k3s_token: "{{ lookup('file', playbook_dir + '/fetched_tokens/' + groups['k3s_control_plane'][0] + '-node-token') }}"
     k3s_url: "https://{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}:6443"
   roles:
-    - role: k3s_worker
+    - role: k3s_workers
 
 - name: Set up Helm
   hosts: k3s_control_plane[0]
@@ -82,7 +82,7 @@
       environment:
         KUBECONFIG: /etc/rancher/k3s/k3s.yaml
       register: kubectl_nodes
-      until: kubectl_nodes.rc == 0 and (kubectl_nodes.stdout_lines | select('search', 'Ready') | list | length) == (groups['k3s_control_plane'] | length + groups['k3s_worker'] | length)
+      until: kubectl_nodes.rc == 0 and (kubectl_nodes.stdout_lines | select('search', 'Ready') | list | length) == (groups['k3s_control_plane'] | length + groups['k3s_workers'] | length)
       retries: 10
       delay: 30
       changed_when: false
@@ -111,7 +111,7 @@
           - "Kubernetes cluster has been successfully set up!"
           - "-------------------------------------------------------------------------"
           - "Control plane nodes: {{ groups['k3s_control_plane'] | join(', ') }}"
-          - "Worker nodes: {{ groups['k3s_worker'] | join(', ') }}"
+          - "Worker nodes: {{ groups['k3s_workers'] | join(', ') }}"
           - "-------------------------------------------------------------------------"
           - "Access the cluster using:"
           - "export KUBECONFIG={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
