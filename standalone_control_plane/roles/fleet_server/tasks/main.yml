@@ -39,6 +39,23 @@
     msg: "Elasticsearch is not running. Please ensure ELK stack is deployed first."
   when: es_pods.resources is not defined or es_pods.resources | length == 0
 
+# Get the elastic password from the Kubernetes secret if not provided
+- name: Get elastic password from Kubernetes secret
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} get secret {{ elasticsearch_cluster_name }}-master-credentials -n {{ elk_namespace }} -o jsonpath='{.data.password}' | base64 --decode
+  register: elastic_pw_result
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  when: elastic_password is not defined or elastic_password == ""
+  no_log: true
+  changed_when: false
+
+- name: Set elastic password from K8s secret
+  set_fact:
+    elastic_password: "{{ elastic_pw_result.stdout }}"
+  when: elastic_password is not defined or elastic_password == ""
+  no_log: true
+
 # Setup Fleet certificates
 - name: Setup Fleet certificates
   include_tasks: certificates.yml

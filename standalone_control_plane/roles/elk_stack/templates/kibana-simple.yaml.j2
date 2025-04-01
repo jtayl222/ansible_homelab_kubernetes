@@ -6,7 +6,7 @@ metadata:
   labels:
     app: kibana
 spec:
-  replicas: {{ kibana_replicas | default(1) }}
+  replicas: 1
   selector:
     matchLabels:
       app: kibana
@@ -15,50 +15,53 @@ spec:
       labels:
         app: kibana
     spec:
-      securityContext:
-        runAsUser: 1000
-        fsGroup: 1000
       containers:
       - name: kibana
         image: docker.elastic.co/kibana/kibana:{{ kibana_version | default('8.5.1') }}
         env:
+        - name: SERVER_NAME
+          value: "kibana"
+        - name: SERVER_PORT
+          value: "5601"
+        - name: SERVER_HOST
+          value: "0.0.0.0"
+        - name: SERVER_BASEPATH
+          value: "/kibana"
+        - name: SERVER_REWRITEBASEPATH
+          value: "true"
         - name: ELASTICSEARCH_HOSTS
           value: "https://{{ elasticsearch_cluster_name }}-master:9200"
         - name: ELASTICSEARCH_USERNAME
           value: "kibana_system"
         - name: ELASTICSEARCH_PASSWORD
-          value: "{{ elastic_password | default('changeme') }}"
-        - name: SERVER_BASEPATH
-          value: "/kibana"
-        - name: SERVER_REWRITEBASEPATH
-          value: "true"
+          value: "{{ elastic_password }}"
         - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
-          value: "certificate"
+          value: "none"
         - name: ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES
           value: "/usr/share/kibana/config/certs/ca.crt"
         - name: XPACK_SECURITY_ENABLED
           value: "true"
         - name: XPACK_SECURITY_ENCRYPTIONKEY
-          value: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+          value: "thisis32bitlongpaddedsecuritykey!"
         - name: XPACK_REPORTING_ENCRYPTIONKEY
-          value: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
+          value: "thisis32bitlongpaddedreportingkey!"
         - name: XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY
-          value: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=32') }}"
-        - name: NODE_OPTIONS
-          value: "--max-old-space-size=1800"
+          value: "thisis32bitlongpaddedobjectskey!"
+        - name: LOGGING_ROOT_LEVEL
+          value: "error"  # Only show errors
+        resources:
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
         ports:
         - containerPort: 5601
         volumeMounts:
         - name: kibana-certificates
           mountPath: /usr/share/kibana/config/certs
           readOnly: true
-        resources:
-          requests:
-            cpu: "{{ kibana_cpu_request | default('100m') }}"
-            memory: "{{ kibana_memory_request | default('512Mi') }}"
-          limits:
-            cpu: "{{ kibana_cpu_limit | default('500m') }}"
-            memory: "{{ kibana_memory_limit | default('1Gi') }}"
       volumes:
       - name: kibana-certificates
         secret:
@@ -73,7 +76,6 @@ spec:
   ports:
   - port: 5601
     targetPort: 5601
-    protocol: TCP
   selector:
     app: kibana
 ---

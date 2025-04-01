@@ -33,10 +33,15 @@
   when: not lookup('file', kubeconfig_path, errors='ignore')
 
 # Generate random password if not set
-- name: Generate random password if not provided
+- name: Check if elastic_password is defined
+  set_fact:
+    _check_password: true
+  when: elastic_password is defined
+
+- name: Set default elastic_password if not defined
   set_fact:
     elastic_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=16') }}"
-  when: elastic_password is not defined or elastic_password == ""
+  when: _check_password is not defined
 
 # Create ELK namespace
 - name: Create ELK namespace
@@ -70,8 +75,8 @@
   tags: elasticsearch
 
 # Kibana setup
-- name: Setup Kibana
-  include_tasks: kibana_direct.yml
+- name: Setup Kibana (simplified)
+  include_tasks: kibana_simplified.yml
   when: deploy_kibana | bool
   tags: kibana
 

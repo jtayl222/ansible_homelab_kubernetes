@@ -4,7 +4,7 @@
   gather_facts: true
   vars:
     kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    elastic_password: "{{ lookup('file', playbook_dir + '/../secrets/elastic_password') }}"
+    elastic_password: "changeme"  # Use the same password as in your ELK deployment
   roles:
     - role: fleet_server
       tags: ["fleet"]

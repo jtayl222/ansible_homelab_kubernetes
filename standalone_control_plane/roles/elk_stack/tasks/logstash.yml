@@ -13,7 +13,7 @@
 - name: Create fixed Elasticsearch password file if it doesn't exist
   copy:
     content: "{{ elastic_password }}"
-    dest: "{{ playbook_dir }}/../secrets/elastic_password"
+    dest: "{{ playbook_dir }}/secrets/elastic_password"
     mode: '0600'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false

@@ -29,7 +29,7 @@
     
     # Security settings
     elasticsearch_security_enabled: true
-    elastic_password: "{{ lookup('file', playbook_dir + '/../secrets/elastic_password') }}"  # Password from file
+    elastic_password: "changeme"  # Replace with your actual password or leave as is to generate random
     elastic_default_password: "changeme"  # Fallback password
     
     # Elasticsearch settings
