@@ -1,0 +1,43 @@
+#!/bin/sh
+
+# Wait for Elasticsearch to be ready
+until curl -k -s https://{{ elasticsearch_cluster_name }}-master:9200 > /dev/null; do
+  echo "Waiting for Elasticsearch..."
+  sleep 5
+done
+
+# Create service account for Kibana if it doesn't exist
+echo "Creating service account for Kibana..."
+curl -k -XPUT -u "elastic:{{ elastic_password | default('changeme') }}" \
+  "https://{{ elasticsearch_cluster_name }}-master:9200/_security/service/elastic/kibana" \
+  -H "Content-Type: application/json" \
+  -d '{"description": "Service account for Kibana"}' || true
+
+# Create service account token
+echo "Creating service account token..."
+TOKEN=$(curl -k -XPOST -u "elastic:{{ elastic_password | default('changeme') }}" \
+  "https://{{ elasticsearch_cluster_name }}-master:9200/_security/service/elastic/kibana/credential/token/kibana-token" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "kibana-token"}' | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+
+if [ -z "$TOKEN" ]; then
+  echo "Failed to create token"
+  exit 1
+fi
+
+# Store the token in a Kubernetes secret
+echo "Creating Kubernetes secret with token..."
+cat <<EOF > /tmp/kibana-token-secret.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kibana-token
+  namespace: {{ elk_namespace }}
+type: Opaque
+stringData:
+  token: $TOKEN
+EOF
+
+# Apply the secret
+kubectl apply -f /tmp/kibana-token-secret.yaml
+echo "Service account token created and stored in secret 'kibana-token'"

@@ -1,0 +1,91 @@
+---
+# roles/elk_stack/tasks/main.yml
+- name: Include variables based on environment
+  include_vars: "{{ item }}"
+  with_first_found:
+    - "{{ ansible_distribution }}.yml"
+    - "default.yml"
+  tags: always
+
+# Create namespace and basic setup
+- name: Ensure required directories exist
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ playbook_dir }}/fetched_tokens"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Verify kubeconfig exists
+  stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_verify
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  
+- name: Fail if kubeconfig doesn't exist
+  fail:
+    msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Run prerequisite playbooks first."
+  when: not kubeconfig_verify.stat.exists
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Create ELK namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: "{{ elk_namespace }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Add Elastic Helm repository
+  kubernetes.core.helm_repository:
+    name: elastic
+    repo_url: https://helm.elastic.co
+    kubeconfig: "{{ kubeconfig_path }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Generate certificates for TLS
+- name: Generate certificates for secure communication
+  include_tasks: certificates.yml
+  when: elasticsearch_security_enabled | bool
+  tags: certificates
+
+# Include component-specific tasks
+- name: Setup Elasticsearch
+  include_tasks: elasticsearch.yml
+  when: deploy_elasticsearch | bool
+  tags: elasticsearch
+
+# Use the direct approach for Kibana (changed from kibana.yml to kibana_direct.yml)
+- name: Setup Kibana
+  include_tasks: kibana_direct.yml
+  when: deploy_kibana | bool
+  tags: kibana
+
+- name: Setup Logstash
+  include_tasks: logstash.yml
+  when: deploy_logstash | bool
+  tags: logstash
+
+- name: Display ELK stack access information
+  debug:
+    msg:
+      - "===================================================================="
+      - "                   ELK Stack Deployment Complete                    "
+      - "===================================================================="
+      - "Access URLs:"
+      - "- Kibana: http://{{ node_ip }}:{{ traefik_port }}/kibana"
+      - "- Elasticsearch: {{ elasticsearch_protocol | default('https') }}://{{ node_ip }}:{{ elasticsearch_port | default('9200') }}"
+      - ""
+      - "Default credentials (if security is enabled):"
+      - "- Username: elastic"
+      - "- Password: {{ elastic_password }}"
+      - "===================================================================="
+  when: deploy_kibana | bool
+  tags: display

@@ -1,0 +1,210 @@
+---
+- name: Cleanup ELK Stack from Kubernetes
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    # Kubeconfig settings
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    
+    # Namespace and release names
+    elk_namespace: elk-stack
+    elasticsearch_release_name: elasticsearch
+    kibana_release_name: kibana
+    logstash_release_name: logstash
+    
+    # Cleanup options
+    remove_pvcs: false  # Set to true to also remove persistent volumes
+    force_deletion: false  # Set to true to force deletion of stuck resources
+    
+  tasks:
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      
+    - name: Fetch kubeconfig from k3s server if not exists
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+      when: not kubeconfig_stat.stat.exists
+      
+    - name: Verify kubeconfig exists
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Check permissions and connectivity."
+      when: not kubeconfig_stat.stat.exists
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      
+    - name: Check if ELK namespace exists
+      kubernetes.core.k8s_info:
+        kind: Namespace
+        name: "{{ elk_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: elk_namespace_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      
+    - name: Display status message if namespace doesn't exist
+      debug:
+        msg: "ELK Stack namespace '{{ elk_namespace }}' doesn't exist. Nothing to clean up."
+      when: elk_namespace_check.failed or elk_namespace_check.resources | length == 0
+      
+    - name: Remove stuck pods if requested
+      shell: kubectl --kubeconfig={{ kubeconfig_path }} delete pods --all --force --grace-period=0 -n {{ elk_namespace }}
+      when: 
+        - force_deletion | bool
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      
+    - name: Remove Kibana Helm release
+      kubernetes.core.helm:
+        name: "{{ kibana_release_name }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        release_namespace: "{{ elk_namespace }}"
+        state: absent
+        wait: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: 
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+      ignore_errors: true
+      
+    - name: Remove Logstash Helm release
+      kubernetes.core.helm:
+        name: "{{ logstash_release_name }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        release_namespace: "{{ elk_namespace }}"
+        state: absent
+        wait: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: 
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+      ignore_errors: true
+      
+    - name: Remove Elasticsearch Helm release
+      kubernetes.core.helm:
+        name: "{{ elasticsearch_release_name }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        release_namespace: "{{ elk_namespace }}"
+        state: absent
+        wait: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: 
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+      ignore_errors: true
+      
+    - name: Wait for releases to be removed
+      pause:
+        seconds: 15
+      when: 
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+        
+    - name: List and remove any remaining PVCs if requested
+      block:
+        - name: Get list of PVCs in ELK namespace
+          kubernetes.core.k8s_info:
+            kind: PersistentVolumeClaim
+            namespace: "{{ elk_namespace }}"
+            kubeconfig: "{{ kubeconfig_path }}"
+          register: elk_pvcs
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          when: 
+            - remove_pvcs | bool
+            - elk_namespace_check.resources is defined
+            - elk_namespace_check.resources | length > 0
+            
+        - name: Delete remaining PVCs
+          kubernetes.core.k8s:
+            kind: PersistentVolumeClaim
+            name: "{{ item.metadata.name }}"
+            namespace: "{{ elk_namespace }}"
+            kubeconfig: "{{ kubeconfig_path }}"
+            state: absent
+          loop: "{{ elk_pvcs.resources }}"
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          when: 
+            - remove_pvcs | bool
+            - elk_pvcs.resources is defined
+            - elk_pvcs.resources | length > 0
+      when: remove_pvcs | bool
+      
+    - name: Remove ELK namespace
+      kubernetes.core.k8s:
+        kind: Namespace
+        name: "{{ elk_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        wait: true
+        wait_timeout: 120
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: 
+        - elk_namespace_check.resources is defined
+        - elk_namespace_check.resources | length > 0
+      ignore_errors: true
+      
+    - name: Wait for namespace to be removed
+      kubernetes.core.k8s_info:
+        kind: Namespace
+        name: "{{ elk_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: final_namespace_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      
+    - name: Force delete namespace if stuck (if requested)
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ elk_namespace }} -o json | \
+        jq '.spec.finalizers = []' | \
+        kubectl --kubeconfig={{ kubeconfig_path }} replace --raw "/api/v1/namespaces/{{ elk_namespace }}/finalize" -f -
+      when: 
+        - force_deletion | bool
+        - final_namespace_check.resources is defined
+        - final_namespace_check.resources | length > 0
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      
+    - name: Check cleanup status
+      kubernetes.core.k8s_info:
+        kind: Namespace
+        name: "{{ elk_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+      register: final_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      
+    - name: Display cleanup status
+      debug:
+        msg: 
+          - "==========================================================="
+          - "                   ELK Stack Cleanup                       "
+          - "==========================================================="
+          - "Cleanup Status: {{ 'Complete' if final_check.failed or final_check.resources | length == 0 else 'Incomplete (some resources may remain)' }}"
+          - "Namespace: {{ elk_namespace }}"
+          - ""
+          - "If resources remain stuck, you can run the playbook again with:"
+          - "  - force_deletion: true"
+          - "  - remove_pvcs: true"
+          - ""
+          - "To completely reinstall the ELK stack, run:"
+          - "ansible-playbook install_110_elk.yml -e clean_install=true"
+          - "==========================================================="

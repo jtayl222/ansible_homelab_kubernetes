@@ -1,0 +1,21 @@
+---
+# Default variables for ELK stack deployment
+elk_namespace: elk-stack
+elasticsearch_cluster_name: "k3s-elk"
+elasticsearch_protocol: "http"
+elasticsearch_port: 9200
+elasticsearch_extra_env_vars: []
+elasticsearch_plugins: []
+elasticsearch_init_containers: []
+
+# Node configuration defaults
+elasticsearch_replicas: 1
+kibana_replicas: 1
+logstash_replicas: 1
+
+# Resource defaults
+elasticsearch_heap_size: "1g"
+elasticsearch_storage_size: "10Gi"
+
+# Traefik settings
+traefik_namespace: kube-system

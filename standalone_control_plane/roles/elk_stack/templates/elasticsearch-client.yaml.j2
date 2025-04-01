@@ -1,0 +1,30 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: elasticsearch-client-util
+  namespace: {{ elk_namespace }}
+spec:
+  schedule: "0 0 * * *"  # Once a day at midnight, doesn't really matter as we'll never run it automatically
+  suspend: true  # Start suspended so it doesn't run automatically
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: elasticsearch-client
+            image: curlimages/curl:latest
+            command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Elasticsearch client utility container"
+              sleep 3600  # Sleep for an hour to allow manual operations
+            volumeMounts:
+            - name: es-certs
+              mountPath: /etc/certs
+              readOnly: true
+          volumes:
+          - name: es-certs
+            secret:
+              secretName: elasticsearch-certificates
+          restartPolicy: Never

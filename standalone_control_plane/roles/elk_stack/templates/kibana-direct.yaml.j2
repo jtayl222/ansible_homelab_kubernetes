@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: {{ elk_namespace }}
+  labels:
+    app: kibana
+spec:
+  replicas: {{ kibana_replicas | default(1) }}
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 1000
+      initContainers:
+      - name: create-service-account
+        image: bitnami/kubectl:latest
+        command:
+        - /bin/bash
+        - -c
+        - |
+          # Create service account for Kibana
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: kibana-service-account-script
+            namespace: {{ elk_namespace }}
+          data:
+            create-token.sh: |
+              #!/bin/bash
+              # Create service account token using elastic user
+              token=\$(curl -XPOST -k -u "elastic:{{ elastic_password | default('changeme') }}" \
+                "https://{{ elasticsearch_cluster_name }}-master:9200/_security/service/elastic/kibana/credential/token/kibana-token" \
+                -H "Content-Type: application/json" \
+                -d '{"name": "kibana-token"}' | grep -o '"value":"[^"]*"' | cut -d'"' -f4)
+              
+              # Store the token in a secret
+              kubectl create secret generic kibana-token --from-literal=token=\${token} -n {{ elk_namespace }} --dry-run=client -o yaml | kubectl apply -f -
+              echo "Service account token created"
+          EOF
+          
+          # Make script executable
+          kubectl create job kibana-create-service-account \
+            --from=cronjob/elasticsearch-client-util \
+            -n {{ elk_namespace }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Wait for the job to complete
+          echo "Waiting for service account token creation..."
+          kubectl wait --for=condition=complete job/kibana-create-service-account -n {{ elk_namespace }} --timeout=120s
+          
+          # Check if token secret exists
+          if kubectl get secret kibana-token -n {{ elk_namespace }} &>/dev/null; then
+            echo "Service account token created successfully"
+            exit 0
+          else
+            echo "Failed to create service account token"
+            exit 1
+          fi
+        volumeMounts:
+        - name: certs
+          mountPath: /etc/certs
+          readOnly: true
+      containers:
+      - name: kibana
+        image: docker.elastic.co/kibana/kibana:{{ kibana_version | default('8.12.0') }}
+        env:
+        - name: ELASTICSEARCH_HOSTS
+          value: "https://{{ elasticsearch_cluster_name }}-master:9200"
+        - name: ELASTICSEARCH_SERVICEACCOUNTTOKEN
+          valueFrom:
+            secretKeyRef:
+              name: kibana-token
+              key: token
+        - name: SERVER_BASEPATH
+          value: "/kibana"
+        - name: SERVER_REWRITEBASEPATH
+          value: "true"
+        - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
+          value: "certificate"
+        resources:
+          requests:
+            cpu: "{{ kibana_cpu_request | default('100m') }}"
+            memory: "{{ kibana_memory_request | default('512Mi') }}"
+          limits:
+            cpu: "{{ kibana_cpu_limit | default('500m') }}"
+            memory: "{{ kibana_memory_limit | default('1Gi') }}"
+        ports:
+        - containerPort: 5601
+        volumeMounts:
+        - name: kibana-config
+          mountPath: /usr/share/kibana/config/kibana.yml
+          subPath: kibana.yml
+        - name: certs
+          mountPath: /usr/share/kibana/config/custom-certs
+          readOnly: true
+      volumes:
+      - name: kibana-config
+        configMap:
+          name: kibana-config
+          items:
+          - key: kibana.yml
+            path: kibana.yml
+      - name: certs
+        secret:
+          secretName: kibana-certificates
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: {{ elk_namespace }}
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    server.basePath: "/kibana"
+    server.rewriteBasePath: true
+    elasticsearch.hosts: ["https://{{ elasticsearch_cluster_name }}-master:9200"]
+    elasticsearch.serviceAccountToken: "${ELASTICSEARCH_SERVICEACCOUNTTOKEN}"
+    elasticsearch.ssl.verificationMode: certificate
+    elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/custom-certs/ca.crt"]
+    elasticsearch.ssl.certificate: "/usr/share/kibana/config/custom-certs/kibana.crt"
+    elasticsearch.ssl.key: "/usr/share/kibana/config/custom-certs/kibana.key"
+    monitoring.ui.container.elasticsearch.enabled: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: {{ elk_namespace }}
+spec:
+  ports:
+  - port: 5601
+    targetPort: 5601
+    protocol: TCP
+  selector:
+    app: kibana
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: kibana
+  namespace: {{ elk_namespace }}
+spec:
+  entryPoints:
+    - web
+  routes:
+    - match: PathPrefix(`/kibana`)
+      kind: Rule
+      services:
+        - name: kibana
+          port: 5601

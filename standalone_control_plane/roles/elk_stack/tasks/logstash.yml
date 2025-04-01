@@ -1,0 +1,109 @@
+---
+# roles/elk_stack/tasks/logstash.yml
+- name: Template Logstash values file
+  template:
+    src: logstash-values.yaml.j2
+    dest: "{{ playbook_dir }}/fetched_tokens/logstash-values.yaml"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Deploy Logstash with Helm
+  kubernetes.core.helm:
+    name: "{{ logstash_release_name }}"
+    chart_ref: elastic/logstash
+    release_namespace: "{{ elk_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+    values_files:
+      - "{{ playbook_dir }}/fetched_tokens/logstash-values.yaml"
+    wait: true  # If waiting is enabled
+    wait_timeout: "300s"  # Add time unit
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  register: logstash_deployment
+
+- name: Wait for Logstash to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: "{{ logstash_release_name }}"
+    namespace: "{{ elk_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: logstash_status
+  until: 
+    - logstash_status.resources is defined 
+    - logstash_status.resources | length > 0 
+    - logstash_status.resources[0].status.readyReplicas is defined 
+    - logstash_status.resources[0].status.readyReplicas == logstash_status.resources[0].status.replicas
+  retries: 20
+  delay: 10
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Create Logstash configuration ConfigMap
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig_path }}"
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: logstash-pipelines
+        namespace: "{{ elk_namespace }}"
+      data:
+        logstash.conf: |
+          input {
+            beats {
+              port => 5044
+            }
+            http {
+              port => 8080
+            }
+          }
+          filter {
+            if [type] == "container" {
+              mutate {
+                add_field => {
+                  "container_name" => "%{[kubernetes][container][name]}"
+                  "namespace" => "%{[kubernetes][namespace]}"
+                  "pod" => "%{[kubernetes][pod][name]}"
+                }
+              }
+            }
+          }
+          output {
+            elasticsearch {
+              hosts => ["{{ elasticsearch_release_name }}-master:9200"]
+              user => "elastic"
+              password => "{{ elastic_password }}"
+              index => "logstash-%{+YYYY.MM.dd}"
+            }
+          }
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  when: create_logstash_configmap | bool
+
+- name: Create Logstash Service for external access
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig_path }}"
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: logstash-beats
+        namespace: "{{ elk_namespace }}"
+      spec:
+        selector:
+          app: "{{ logstash_release_name }}"
+        ports:
+          - name: beats
+            port: 5044
+            protocol: TCP
+            targetPort: 5044
+          - name: http
+            port: 8080
+            protocol: TCP
+            targetPort: 8080
+        type: ClusterIP
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  when: create_logstash_configmap | bool

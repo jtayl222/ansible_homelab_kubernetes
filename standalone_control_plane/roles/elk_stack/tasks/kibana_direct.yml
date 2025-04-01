@@ -1,0 +1,84 @@
+---
+# Direct Kubernetes manifest approach for Kibana
+- name: Template direct Kibana manifest
+  template:
+    src: kibana-direct.yaml.j2
+    dest: "{{ playbook_dir }}/fetched_tokens/kibana-direct.yaml"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Template Elasticsearch client utility
+  template:
+    src: elasticsearch-client.yaml.j2
+    dest: "{{ playbook_dir }}/fetched_tokens/elasticsearch-client.yaml"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Force delete previous Kibana resources
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} delete pods,jobs,deployments,services,configmaps -l app=kibana -n {{ elk_namespace }} --grace-period=0 --force || true
+    kubectl --kubeconfig={{ kubeconfig_path }} delete job pre-install-kibana-kibana -n {{ elk_namespace }} --grace-period=0 --force || true
+    helm --kubeconfig={{ kubeconfig_path }} uninstall {{ kibana_release_name }} -n {{ elk_namespace }} || true
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+
+- name: Wait for previous resources to be removed
+  pause:
+    seconds: 10
+
+- name: Apply Elasticsearch client utility CronJob
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig_path }}"
+    src: "{{ playbook_dir }}/fetched_tokens/elasticsearch-client.yaml"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Create Kibana service account and token
+  include_tasks: create_kibana_service_account.yml
+
+- name: Deploy Kibana with direct Kubernetes manifest
+  kubernetes.core.k8s:
+    state: present
+    src: "{{ playbook_dir }}/fetched_tokens/kibana-direct.yaml"
+    kubeconfig: "{{ kubeconfig_path }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Wait for Kibana deployment to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: kibana
+    namespace: "{{ elk_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: kibana_status
+  until: 
+    - kibana_status.resources is defined 
+    - kibana_status.resources | length > 0 
+    - kibana_status.resources[0].status.readyReplicas is defined 
+    - kibana_status.resources[0].status.readyReplicas > 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Get Kibana pod name
+  shell: >
+    kubectl --kubeconfig={{ kubeconfig_path }} get pods -n {{ elk_namespace }} -l app=kibana -o jsonpath='{.items[0].metadata.name}'
+  register: kibana_pod
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+
+- name: Check Kibana logs
+  shell: >
+    kubectl --kubeconfig={{ kubeconfig_path }} logs {{ kibana_pod.stdout }} -n {{ elk_namespace }} | tail -20
+  register: kibana_logs
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+
+- name: Display Kibana logs
+  debug:
+    var: kibana_logs.stdout_lines

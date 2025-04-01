@@ -1,0 +1,77 @@
+---
+# Elasticsearch Helm chart values
+
+# Set cluster and node names
+clusterName: "{{ elasticsearch_cluster_name | default('elasticsearch') }}"
+nodeGroup: "master"
+
+# Node roles - use proper boolean values
+masterRole: true
+ingestRole: true
+dataRole: true  
+
+# Number of replicas
+replicas: {{ elasticsearch_replicas | default(1) }}
+
+# Set the JVM heap size
+esJavaOpts: "-Xmx{{ elasticsearch_heap_size | default('1g') }} -Xms{{ elasticsearch_heap_size | default('1g') }}"
+
+# Resources configuration
+resources:
+  requests:
+    cpu: "{{ elasticsearch_cpu_request | default('100m') }}"
+    memory: "{{ elasticsearch_memory_request | default('1Gi') }}"
+  limits:
+    cpu: "{{ elasticsearch_cpu_limit | default('1000m') }}"
+    memory: "{{ elasticsearch_memory_limit | default('2Gi') }}"
+
+# Storage configuration
+volumeClaimTemplate:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ elasticsearch_storage_size | default('10Gi') }}
+  storageClassName: "nfs-client"  # Use the NFS StorageClass
+
+# Security settings with TLS
+secret:
+  enabled: true
+  password: "{{ elastic_password | default('changeme') }}"
+
+# Configure TLS
+protocol: https
+
+# Certificate configuration
+esConfig:
+  elasticsearch.yml: |
+    xpack.security.enabled: true
+    xpack.security.transport.ssl.enabled: true
+    xpack.security.transport.ssl.verification_mode: certificate
+    xpack.security.transport.ssl.key: /usr/share/elasticsearch/config/custom-certs/elasticsearch.key
+    xpack.security.transport.ssl.certificate: /usr/share/elasticsearch/config/custom-certs/elasticsearch.crt
+    xpack.security.transport.ssl.certificate_authorities: ["/usr/share/elasticsearch/config/custom-certs/ca.crt"]
+    xpack.security.http.ssl.enabled: true
+    xpack.security.http.ssl.key: /usr/share/elasticsearch/config/custom-certs/elasticsearch.key
+    xpack.security.http.ssl.certificate: /usr/share/elasticsearch/config/custom-certs/elasticsearch.crt
+    xpack.security.http.ssl.certificate_authorities: ["/usr/share/elasticsearch/config/custom-certs/ca.crt"]
+
+# Mount certificates with a unique path
+extraVolumes:
+  - name: elasticsearch-certificates
+    secret:
+      secretName: elasticsearch-certificates
+
+extraVolumeMounts:
+  - name: elasticsearch-certificates
+    mountPath: /usr/share/elasticsearch/config/custom-certs
+    readOnly: true
+
+# Set network host to make it available externally if needed
+networkHost: "0.0.0.0"
+
+# Configure service
+service:
+  type: ClusterIP
+
+# Enable pod anti-affinity to spread across nodes for multiple replicas
+antiAffinity: "soft"
