@@ -9,6 +9,9 @@ deploy_elasticsearch: true
 deploy_kibana: true
 deploy_logstash: true  # Make sure this is true
 
+# Security settings
+elasticsearch_security_enabled: true
+
 # Default variables for ELK stack deployment
 elasticsearch_cluster_name: "k3s-elk"
 elasticsearch_protocol: "http"
@@ -26,5 +29,11 @@ logstash_replicas: 1
 elasticsearch_heap_size: "1g"
 elasticsearch_storage_size: "10Gi"
 
+# Version settings
+elasticsearch_version: "8.5.1"
+kibana_version: "8.5.1"
+logstash_version: "8.5.1"
+
 # Traefik settings
 traefik_namespace: kube-system
+traefik_port: 30080  # Default port, adjust as needed

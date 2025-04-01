@@ -1,0 +1,10 @@
+---
+- name: Install Fleet server for the ELK stack
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    elastic_password: "{{ lookup('file', playbook_dir + '/../secrets/elastic_password') }}"
+  roles:
+    - role: fleet_server
+      tags: ["fleet"]

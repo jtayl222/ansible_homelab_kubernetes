@@ -1,5 +1,7 @@
 ---
 # roles/elk_stack/tasks/main.yml
+
+# Include variables based on environment
 - name: Include variables based on environment
   include_vars: "{{ item }}"
   with_first_found:
@@ -24,14 +26,19 @@
   register: kubeconfig_verify
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
-  
+
 - name: Fail if kubeconfig doesn't exist
   fail:
     msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Run prerequisite playbooks first."
-  when: not kubeconfig_verify.stat.exists
-  delegate_to: "{{ groups['utility'][0] }}"
-  become: false
+  when: not lookup('file', kubeconfig_path, errors='ignore')
 
+# Generate random password if not set
+- name: Generate random password if not provided
+  set_fact:
+    elastic_password: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=16') }}"
+  when: elastic_password is not defined or elastic_password == ""
+
+# Create ELK namespace
 - name: Create ELK namespace
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
@@ -50,10 +57,10 @@
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
-# Generate certificates for TLS
+# Generate certificates only if Elasticsearch is deployed or certificates are needed
 - name: Generate certificates for secure communication
   include_tasks: certificates.yml
-  when: elasticsearch_security_enabled | bool
+  when: elasticsearch_security_enabled | bool and (deploy_elasticsearch | bool or deploy_kibana | bool or deploy_logstash | bool or deploy_fleet | bool)
   tags: certificates
 
 # Include component-specific tasks
@@ -62,7 +69,7 @@
   when: deploy_elasticsearch | bool
   tags: elasticsearch
 
-# Use the direct approach for Kibana (changed from kibana.yml to kibana_direct.yml)
+# Kibana setup
 - name: Setup Kibana
   include_tasks: kibana_direct.yml
   when: deploy_kibana | bool
@@ -76,16 +83,10 @@
 - name: Display ELK stack access information
   debug:
     msg:
-      - "===================================================================="
-      - "                   ELK Stack Deployment Complete                    "
-      - "===================================================================="
-      - "Access URLs:"
-      - "- Kibana: http://{{ node_ip }}:{{ traefik_port }}/kibana"
-      - "- Elasticsearch: {{ elasticsearch_protocol | default('https') }}://{{ node_ip }}:{{ elasticsearch_port | default('9200') }}"
-      - ""
-      - "Default credentials (if security is enabled):"
-      - "- Username: elastic"
-      - "- Password: {{ elastic_password }}"
-      - "===================================================================="
-  when: deploy_kibana | bool
-  tags: display
+      - "Elasticsearch: http://{{ hostvars[groups['utility'][0]]['ansible_host'] }}:{{ elasticsearch_port }}"
+      - "Kibana: http://{{ hostvars[groups['utility'][0]]['ansible_host'] }}:{{ traefik_port }}/kibana"
+      - "Username: elastic"
+      - "Password: {{ elastic_password }}"
+  when: deploy_elasticsearch | bool or deploy_kibana | bool
+  tags: ["elasticsearch", "kibana"]
+

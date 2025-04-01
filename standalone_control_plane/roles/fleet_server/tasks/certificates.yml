@@ -1,0 +1,33 @@
+---
+# Create certificates for Fleet server
+
+- name: Ensure directories exist
+  file:
+    path: "{{ playbook_dir }}/fetched_tokens/fleet-certs"
+    state: directory
+    mode: '0755'
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Extract Elasticsearch CA certificate
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} get secret {{ elasticsearch_cluster_name }}-master-certs -n {{ elk_namespace }} -o jsonpath='{.data.ca\.crt}' | base64 -d > {{ playbook_dir }}/fetched_tokens/fleet-certs/ca.crt
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: true
+
+- name: Create Fleet certificates secret
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig_path }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: fleet-certificates
+        namespace: "{{ elk_namespace }}"
+      type: Opaque
+      data:
+        ca.crt: "{{ lookup('file', playbook_dir + '/fetched_tokens/fleet-certs/ca.crt') | b64encode }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
