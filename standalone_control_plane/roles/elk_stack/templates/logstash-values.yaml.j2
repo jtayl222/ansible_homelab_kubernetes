@@ -27,8 +27,9 @@ securityContext:
 logstashConfig:
   logstash.yml: |
     http.host: 0.0.0.0
+    xpack.monitoring.enabled: true
     xpack.monitoring.elasticsearch.hosts: ["https://{{ elasticsearch_cluster_name }}-master:9200"]
-    xpack.monitoring.elasticsearch.username: elastic
+    xpack.monitoring.elasticsearch.username: "kibana_system"
     xpack.monitoring.elasticsearch.password: "{{ elastic_password | default('changeme') }}"
     xpack.monitoring.elasticsearch.ssl.verification_mode: certificate
     xpack.monitoring.elasticsearch.ssl.certificate_authority: /usr/share/logstash/config/certs/ca.crt
@@ -63,7 +64,7 @@ logstashPipeline:
     output {
       elasticsearch {
         hosts => ["https://{{ elasticsearch_cluster_name }}-master:9200"]
-        user => "elastic"
+        user => "kibana_system"
         password => "{{ elastic_password | default('changeme') }}"
         ssl => true
         ssl_certificate_verification => true

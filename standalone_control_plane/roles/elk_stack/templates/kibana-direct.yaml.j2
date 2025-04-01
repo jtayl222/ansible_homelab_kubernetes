@@ -24,17 +24,18 @@ spec:
         env:
         - name: ELASTICSEARCH_HOSTS
           value: "https://{{ elasticsearch_cluster_name }}-master:9200"
-        - name: ELASTICSEARCH_SERVICEACCOUNTTOKEN
-          valueFrom:
-            secretKeyRef:
-              name: kibana-token
-              key: token
+        - name: ELASTICSEARCH_USERNAME
+          value: "kibana_system"
+        - name: ELASTICSEARCH_PASSWORD
+          value: "{{ elastic_password | default('changeme') }}"
         - name: SERVER_BASEPATH
           value: "/kibana"
         - name: SERVER_REWRITEBASEPATH
           value: "true"
         - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
           value: "certificate"
+        - name: ELASTICSEARCH_SSL_CERTIFICATEAUTHORITIES
+          value: "/usr/share/kibana/config/certs/ca.crt"
         resources:
           requests:
             cpu: "{{ kibana_cpu_request | default('100m') }}"
@@ -45,20 +46,11 @@ spec:
         ports:
         - containerPort: 5601
         volumeMounts:
-        - name: kibana-config
-          mountPath: /usr/share/kibana/config/kibana.yml
-          subPath: kibana.yml
-        - name: certs
-          mountPath: /usr/share/kibana/config/custom-certs
+        - name: kibana-certificates
+          mountPath: /usr/share/kibana/config/certs
           readOnly: true
       volumes:
-      - name: kibana-config
-        configMap:
-          name: kibana-config
-          items:
-          - key: kibana.yml
-            path: kibana.yml
-      - name: certs
+      - name: kibana-certificates
         secret:
           secretName: kibana-certificates
 ---
@@ -74,11 +66,12 @@ data:
     server.basePath: "/kibana"
     server.rewriteBasePath: true
     elasticsearch.hosts: ["https://{{ elasticsearch_cluster_name }}-master:9200"]
-    elasticsearch.serviceAccountToken: "${ELASTICSEARCH_SERVICEACCOUNTTOKEN}"
+    elasticsearch.username: kibana_system
+    elasticsearch.password: "{{ elastic_password | default('changeme') }}"
     elasticsearch.ssl.verificationMode: certificate
-    elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/custom-certs/ca.crt"]
-    elasticsearch.ssl.certificate: "/usr/share/kibana/config/custom-certs/kibana.crt"
-    elasticsearch.ssl.key: "/usr/share/kibana/config/custom-certs/kibana.key"
+    elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca.crt"]
+    elasticsearch.ssl.certificate: "/usr/share/kibana/config/certs/kibana.crt"
+    elasticsearch.ssl.key: "/usr/share/kibana/config/certs/kibana.key"
     monitoring.ui.container.elasticsearch.enabled: true
 ---
 apiVersion: v1

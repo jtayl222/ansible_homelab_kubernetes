@@ -1,0 +1,32 @@
+---
+# Extract Elasticsearch CA certificate and create Kibana certificate secret
+- name: Ensure fetched_tokens directory exists
+  file:
+    path: "{{ playbook_dir }}/fetched_tokens"
+    state: directory
+    mode: '0755'
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Extract Elasticsearch CA certificate
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} get secret k3s-elk-master-certs -n {{ elk_namespace }} -o jsonpath='{.data.ca\.crt}' | base64 -d > {{ playbook_dir }}/fetched_tokens/es-ca.crt
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: true
+
+- name: Create Kibana certificates secret
+  kubernetes.core.k8s:
+    state: present
+    kubeconfig: "{{ kubeconfig_path }}"
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: kibana-certificates
+        namespace: "{{ elk_namespace }}"
+      type: Opaque
+      data:
+        ca.crt: "{{ lookup('file', playbook_dir + '/fetched_tokens/es-ca.crt') | b64encode }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false

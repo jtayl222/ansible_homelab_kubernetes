@@ -1,11 +1,23 @@
 ---
 # roles/elk_stack/tasks/logstash.yml
+- name: Setup Logstash certificates
+  include_tasks: logstash_certificates.yml
+
 - name: Template Logstash values file
   template:
     src: logstash-values.yaml.j2
     dest: "{{ playbook_dir }}/fetched_tokens/logstash-values.yaml"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+
+- name: Create fixed Elasticsearch password file if it doesn't exist
+  copy:
+    content: "{{ elastic_password }}"
+    dest: "{{ playbook_dir }}/../secrets/elastic_password"
+    mode: '0600'
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  when: elastic_password is defined and elastic_password != ""
 
 - name: Deploy Logstash with Helm
   kubernetes.core.helm:
@@ -15,25 +27,22 @@
     kubeconfig: "{{ kubeconfig_path }}"
     values_files:
       - "{{ playbook_dir }}/fetched_tokens/logstash-values.yaml"
-    wait: true  # If waiting is enabled
-    wait_timeout: "300s"  # Add time unit
+    wait: true
+    wait_timeout: "300s"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   register: logstash_deployment
 
 - name: Wait for Logstash to be ready
   kubernetes.core.k8s_info:
-    kind: Deployment
-    name: "{{ logstash_release_name }}"
+    kind: Pod
     namespace: "{{ elk_namespace }}"
+    label_selectors:
+      - app=logstash-logstash
     kubeconfig: "{{ kubeconfig_path }}"
-  register: logstash_status
-  until: 
-    - logstash_status.resources is defined 
-    - logstash_status.resources | length > 0 
-    - logstash_status.resources[0].status.readyReplicas is defined 
-    - logstash_status.resources[0].status.readyReplicas == logstash_status.resources[0].status.replicas
-  retries: 20
+  register: logstash_pods
+  until: logstash_pods.resources is defined and logstash_pods.resources | length > 0 and logstash_pods.resources[0].status.phase == 'Running'
+  retries: 30
   delay: 10
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
@@ -72,10 +81,10 @@
           output {
             elasticsearch {
               hosts => ["https://{{ elasticsearch_cluster_name }}-master:9200"]
-              user => "elastic"
+              user => "kibana_system"  # Use kibana_system user as we know it's configured
               password => "{{ elastic_password }}"
               ssl => true
-              ssl_certificate_verification => false  # Set to false to bypass TLS verification
+              ssl_certificate_verification => false
               index => "logstash-%{+YYYY.MM.dd}"
             }
           }
