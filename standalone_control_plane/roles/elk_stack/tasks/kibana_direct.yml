@@ -1,16 +1,16 @@
 ---
 # Direct Kubernetes manifest approach for Kibana
-- name: Template direct Kibana manifest
+- name: Template direct Kibana manifest (using kibana_system user)
   template:
-    src: kibana-direct.yaml.j2
+    src: kibana-direct-alt.yaml.j2
     dest: "{{ playbook_dir }}/fetched_tokens/kibana-direct.yaml"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
-- name: Template Elasticsearch client utility
+- name: Template Kibana user setup job
   template:
-    src: elasticsearch-client.yaml.j2
-    dest: "{{ playbook_dir }}/fetched_tokens/elasticsearch-client.yaml"
+    src: setup-kibana-user.yaml.j2
+    dest: "{{ playbook_dir }}/fetched_tokens/setup-kibana-user.yaml"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
@@ -18,6 +18,8 @@
   shell: |
     kubectl --kubeconfig={{ kubeconfig_path }} delete pods,jobs,deployments,services,configmaps -l app=kibana -n {{ elk_namespace }} --grace-period=0 --force || true
     kubectl --kubeconfig={{ kubeconfig_path }} delete job pre-install-kibana-kibana -n {{ elk_namespace }} --grace-period=0 --force || true
+    kubectl --kubeconfig={{ kubeconfig_path }} delete job setup-kibana-user -n {{ elk_namespace }} --grace-period=0 --force || true
+    kubectl --kubeconfig={{ kubeconfig_path }} delete job create-kibana-token -n {{ elk_namespace }} --grace-period=0 --force || true
     helm --kubeconfig={{ kubeconfig_path }} uninstall {{ kibana_release_name }} -n {{ elk_namespace }} || true
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
@@ -27,18 +29,27 @@
   pause:
     seconds: 10
 
-- name: Apply Elasticsearch client utility CronJob
+- name: Apply Kibana user setup job
   kubernetes.core.k8s:
     state: present
+    src: "{{ playbook_dir }}/fetched_tokens/setup-kibana-user.yaml"
     kubeconfig: "{{ kubeconfig_path }}"
-    src: "{{ playbook_dir }}/fetched_tokens/elasticsearch-client.yaml"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
-- name: Create Kibana service account and token
-  include_tasks: create_kibana_service_account.yml
+- name: Wait for user setup job to complete
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=complete job/setup-kibana-user -n {{ elk_namespace }} --timeout=60s
+  register: job_complete
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  retries: 10
+  delay: 10
+  until: job_complete.rc == 0
+  failed_when: false
+  changed_when: false
 
-- name: Deploy Kibana with direct Kubernetes manifest
+- name: Deploy Kibana with kibana_system user
   kubernetes.core.k8s:
     state: present
     src: "{{ playbook_dir }}/fetched_tokens/kibana-direct.yaml"

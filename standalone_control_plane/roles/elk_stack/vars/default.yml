@@ -1,6 +1,15 @@
 ---
+# Default variables for the ELK stack role
+
+# Namespace for the ELK stack
+elk_namespace: "elk-stack"
+
+# Deployment flags
+deploy_elasticsearch: true
+deploy_kibana: true
+deploy_logstash: true  # Make sure this is true
+
 # Default variables for ELK stack deployment
-elk_namespace: elk-stack
 elasticsearch_cluster_name: "k3s-elk"
 elasticsearch_protocol: "http"
 elasticsearch_port: 9200

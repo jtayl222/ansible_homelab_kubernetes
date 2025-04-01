@@ -1,0 +1,48 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: setup-kibana-user
+  namespace: {{ elk_namespace }}
+spec:
+  ttlSecondsAfterFinished: 100
+  template:
+    spec:
+      containers:
+      - name: setup-kibana
+        image: curlimages/curl:latest
+        command:
+        - /bin/sh
+        - -c
+        - |
+          # Wait for Elasticsearch to be ready
+          until curl -k -s https://{{ elasticsearch_cluster_name }}-master:9200 > /dev/null; do
+            echo "Waiting for Elasticsearch..."
+            sleep 5
+          done
+
+          # Set the kibana_system user password
+          echo "Setting kibana_system user password..."
+          curl -k -XPOST -u "elastic:{{ elastic_password | default('changeme') }}" \
+            "https://{{ elasticsearch_cluster_name }}-master:9200/_security/user/kibana_system/_password" \
+            -H "Content-Type: application/json" \
+            -d '{"password": "{{ elastic_password | default('changeme') }}"}' || echo "Failed to set password"
+
+          # Create a custom kibana_admin role if needed
+          echo "Creating kibana_admin role..."
+          curl -k -XPUT -u "elastic:{{ elastic_password | default('changeme') }}" \
+            "https://{{ elasticsearch_cluster_name }}-master:9200/_security/role/kibana_admin" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "cluster": ["monitor", "manage_index_templates", "manage_ml", "manage_token", "manage_ilm", "monitor_watcher", "monitor_rollup"],
+              "indices": [
+                {
+                  "names": ["*"],
+                  "privileges": ["read", "view_index_metadata", "monitor"]
+                }
+              ]
+            }' || echo "Failed to create role"
+
+          # Grant kibana_system user the appropriate roles
+          echo "Success"
+      restartPolicy: Never
+  backoffLimit: 3

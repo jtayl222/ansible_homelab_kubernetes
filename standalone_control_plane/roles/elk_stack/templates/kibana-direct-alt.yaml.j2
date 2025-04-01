@@ -24,17 +24,22 @@ spec:
         env:
         - name: ELASTICSEARCH_HOSTS
           value: "https://{{ elasticsearch_cluster_name }}-master:9200"
-        - name: ELASTICSEARCH_SERVICEACCOUNTTOKEN
-          valueFrom:
-            secretKeyRef:
-              name: kibana-token
-              key: token
+        - name: ELASTICSEARCH_USERNAME
+          value: "kibana_system"
+        - name: ELASTICSEARCH_PASSWORD
+          value: "{{ elastic_password | default('changeme') }}"
         - name: SERVER_BASEPATH
           value: "/kibana"
         - name: SERVER_REWRITEBASEPATH
           value: "true"
         - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
           value: "certificate"
+        - name: XPACK_SECURITY_ENCRYPTIONKEY
+          value: "{{ lookup('password', '/dev/null chars=ascii_letters length=32') }}"
+        - name: XPACK_REPORTING_ENCRYPTIONKEY
+          value: "{{ lookup('password', '/dev/null chars=ascii_letters length=32') }}"
+        - name: XPACK_ENCRYPTEDSAVEDOBJECTS_ENCRYPTIONKEY
+          value: "{{ lookup('password', '/dev/null chars=ascii_letters length=32') }}"
         resources:
           requests:
             cpu: "{{ kibana_cpu_request | default('100m') }}"
@@ -74,12 +79,18 @@ data:
     server.basePath: "/kibana"
     server.rewriteBasePath: true
     elasticsearch.hosts: ["https://{{ elasticsearch_cluster_name }}-master:9200"]
-    elasticsearch.serviceAccountToken: "${ELASTICSEARCH_SERVICEACCOUNTTOKEN}"
+    elasticsearch.username: kibana_system
+    elasticsearch.password: {{ elastic_password | default('changeme') }}
     elasticsearch.ssl.verificationMode: certificate
     elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/custom-certs/ca.crt"]
     elasticsearch.ssl.certificate: "/usr/share/kibana/config/custom-certs/kibana.crt"
     elasticsearch.ssl.key: "/usr/share/kibana/config/custom-certs/kibana.key"
     monitoring.ui.container.elasticsearch.enabled: true
+    xpack.security.enabled: true
+    # Skip reporting feature
+    xpack.reporting.enabled: false
+    # Explicitly set user role settings
+    elasticsearch.requestHeadersWhitelist: [ authorization ]
 ---
 apiVersion: v1
 kind: Service
