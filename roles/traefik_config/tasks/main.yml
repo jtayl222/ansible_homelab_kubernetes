@@ -4,7 +4,7 @@
     path: "{{ playbook_dir }}/fetched_tokens"
     state: directory
     mode: '0700'
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Fetch kubeconfig from control plane node
@@ -19,7 +19,7 @@
     path: "{{ kubeconfig_path }}"
     regexp: 'https://127.0.0.1:6443'
     replace: 'https://{{ ansible_host }}:6443'
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: not kubeconfig_local is defined or not kubeconfig_local
 
@@ -32,14 +32,14 @@
   register: traefik_status
   changed_when: false
   failed_when: false
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Fail if Traefik is not installed
   fail:
     msg: "Traefik is not installed in the cluster. Please ensure your K3s installation includes Traefik."
   when: traefik_status.rc != 0
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 # Get Traefik service information for port details
@@ -50,13 +50,13 @@
     get service traefik -o json
   register: traefik_service
   changed_when: false
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Parse Traefik service details
   set_fact:
     traefik_service_json: "{{ traefik_service.stdout | from_json }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 # Configure Traefik dashboard access
@@ -65,7 +65,7 @@
     src: traefik-dashboard.yaml.j2
     dest: "{{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml"
     mode: '0600'
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   
 - name: Apply Traefik dashboard IngressRoute
@@ -73,7 +73,7 @@
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml
   register: dashboard_applied
   changed_when: dashboard_applied.rc == 0
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 # Configure Traefik Middleware for applications
@@ -82,7 +82,7 @@
     src: traefik-middlewares.yaml.j2
     dest: "{{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml"
     mode: '0600'
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   
 - name: Apply Traefik middlewares
@@ -90,7 +90,7 @@
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml
   register: middlewares_applied
   changed_when: middlewares_applied.rc == 0
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 # Display Traefik information
@@ -103,5 +103,5 @@
       - "Traefik HTTPS port: {{ traefik_service_json.spec.ports | selectattr('name', 'equalto', 'websecure') | map(attribute='nodePort') | first | default('Not configured') }}"
       - "Access Traefik dashboard at: http://{{ ansible_host }}:{{ traefik_service_json.spec.ports | selectattr('name', 'equalto', 'web') | map(attribute='nodePort') | first }}/dashboard/"
       - "---------------------------------------------"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false

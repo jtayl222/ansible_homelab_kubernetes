@@ -19,7 +19,7 @@
       ansible.builtin.file:
         path: "/tmp/grafana-test-dashboards.yaml"
         state: absent
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
         
     - name: Display cleanup status

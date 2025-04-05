@@ -1,0 +1,56 @@
+---
+- name: Diagnose Kibana Readiness Issues
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    elastic_namespace: "elastic"
+
+  tasks:
+    - name: Get Kibana pod name
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l kibana.k8s.elastic.co/name=kibana -o jsonpath='{.items[0].metadata.name}'
+      register: kibana_pod_name
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Check if netcat is installed in the Kibana pod
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- which nc || echo "netcat not found"
+      register: netcat_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Test readiness probe commands directly
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- curl -k -s -o /dev/null -w "%{http_code}" https://localhost:5601/api/status || echo "Failed to check status API"
+      register: status_api_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Test readiness probe with basePath
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- curl -k -s -o /dev/null -w "%{http_code}" https://localhost:5601/kibana/api/status || echo "Failed to check status API with basePath"
+      register: status_api_basepath_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Check if port 5601 is listening in pod
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- bash -c "netstat -tulpn | grep 5601" || echo "Port 5601 not listening"
+      register: port_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Display diagnostics
+      debug:
+        msg:
+          - "Kibana Pod Name: {{ kibana_pod_name.stdout }}"
+          - "Netcat check: {{ netcat_check.stdout }}"
+          - "Status API check: {{ status_api_check.stdout }}"
+          - "Status API with basePath check: {{ status_api_basepath_check.stdout }}"
+          - "Port 5601 check: {{ port_check.stdout }}"

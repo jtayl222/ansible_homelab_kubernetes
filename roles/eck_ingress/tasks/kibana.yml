@@ -1,0 +1,99 @@
+---
+# Create IngressRoute for Kibana
+- name: Create IngressRoute for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`) || Host(`kibana.192.168.1.85`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+                responseForwarding:
+                  flushInterval: "100ms"
+                passHostHeader: true
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create simple IngressRoute for Kibana 
+- name: Create simple IngressRoute for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-simple
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create a dedicated ServersTransport for Kibana
+- name: Create dedicated ServersTransport for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: ServersTransport
+      metadata:
+        name: insecure-transport
+        namespace: "{{ namespace }}"
+      spec:
+        insecureSkipVerify: true
+        forwardingTimeouts:
+          responseHeaderTimeout: "180s"
+          idleConnTimeout: "180s"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create NodePort service for direct Kibana access
+- name: Create NodePort for direct Kibana access
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: kibana-direct-nodeport
+        namespace: "{{ namespace }}"
+      spec:
+        selector:
+          kibana.k8s.elastic.co/name: kibana
+        ports:
+          - name: https
+            port: 5601
+            targetPort: 5601
+            nodePort: 30601
+        type: NodePort
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false

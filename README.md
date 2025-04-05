@@ -100,6 +100,16 @@ For a fresh install of the K3s cluster with NFS, Prometheus, and Grafana:
 - Validate storage: `ansible-playbook -i inventory/my_inventory.yml test_nfs_pvc.yml`
 - Check Grafana: `ansible-playbook -i inventory/my_inventory.yml test_grafana_config.yml`
 
+## Configuration
+
+This project uses Ansible's variable hierarchy to manage configuration:
+
+1. Copy `group_vars/all/common.yml.example` to `group_vars/all/common.yml`
+2. Edit the values to match your environment
+3. This file is gitignored to prevent exposing sensitive information
+
+Variables are used across playbooks to maintain consistent settings.
+
 ## MLflow Installation
 
 This repository includes playbooks to deploy MLflow, a platform for the machine learning lifecycle.

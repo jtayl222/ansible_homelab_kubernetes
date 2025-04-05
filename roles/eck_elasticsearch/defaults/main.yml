@@ -1,0 +1,4 @@
+---
+namespace: "elastic"
+storage_class_name: "nfs-client"
+storage_size: "100Gi"

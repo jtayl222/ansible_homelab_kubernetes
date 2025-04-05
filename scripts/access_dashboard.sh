@@ -1,6 +1,6 @@
 #!/bin/bash
 
-KUBECONFIG="/home/user/ansible_homelab_kubernetes/standalone_control_plane/fetched_tokens/k3s-kubeconfig"
+KUBECONFIG="/home/user/ansible_homelab_kubernetes/fetched_tokens/k3s-kubeconfig"
 NAMESPACE="kubernetes-dashboard"
 TOKEN=$(kubectl --kubeconfig=$KUBECONFIG -n $NAMESPACE get secret dashboard-admin-token -o jsonpath="{.data.token}" | base64 -d)
 

@@ -14,7 +14,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0700'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       run_once: true
 
@@ -30,7 +30,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0700'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       run_once: true
       
@@ -39,7 +39,7 @@
         content: "{{ k3s_token }}"
         dest: "{{ playbook_dir }}/fetched_tokens/{{ ansible_hostname }}-node-token"
         mode: '0600'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Update kubeconfig to use cluster IP
@@ -47,7 +47,7 @@
         path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
         regexp: 'https://127.0.0.1:6443'
         replace: 'https://{{ hostvars[groups["k3s_control_plane"][0]]["ansible_host"] }}:6443'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       run_once: true
       
@@ -125,6 +125,6 @@
           - "kubectl port-forward svc/prometheus-server 9090:9090 -n monitoring"
           - "kubectl port-forward svc/grafana 3000:80 -n monitoring"
           - "-------------------------------------------------------------------------"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       run_once: true

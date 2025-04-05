@@ -1,18 +1,30 @@
 # inventory/hosts
 
+# All nodes in the cluster
+[all]
+k3s-control-1 ansible_host=192.168.1.10 ansible_user=user
+k3s-control-2 ansible_host=192.168.1.11 ansible_user=user
+k3s-control-3 ansible_host=192.168.1.12 ansible_user=user
+k3s-worker-1 ansible_host=192.168.1.20 ansible_user=user
+k3s-worker-2 ansible_host=192.168.1.21 ansible_user=user
+external-node ansible_host=192.168.1.30 ansible_user=user
+
+# Define which node(s) will run the Kubernetes control-plane (server)
 [k3s_control_plane]
-k3s-control-1 ansible_host=192.168.1.10
-k3s-control-2 ansible_host=192.168.1.11
-k3s-control-3 ansible_host=192.168.1.12
+k3s-control-1
+k3s-control-2
+k3s-control-3
 
-[k3s_cluster:children]
-k3s_control_plane
-k3s_workers
-
+# Define which nodes will be workers
 [k3s_workers]
-k3s-worker-1 ansible_host=192.168.1.20
-k3s-worker-2 ansible_host=192.168.1.21
+k3s-worker-1
+k3s-worker-2
 
-[all:vars]
-k3s_version=v1.28.6+k3s1 # Example K3s version
-k3s_install_opts="--disable traefik --disable servicelb" #example options
+# Define utility nodes (not part of the K8s cluster)
+[utility]
+external-node
+
+[nfs_server]
+external-node
+
+

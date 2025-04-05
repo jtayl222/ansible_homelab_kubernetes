@@ -4,14 +4,14 @@
     url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
     dest: /tmp/get_helm.sh
     mode: '0700'
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Install Helm
   command: /tmp/get_helm.sh
   args:
     creates: /usr/local/bin/helm
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Ensure required variables are defined
@@ -24,7 +24,7 @@
   register: dashboard_installed
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
   ignore_errors: yes
 
@@ -33,14 +33,14 @@
   when: "'kubernetes-dashboard' in dashboard_installed.stdout"
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Add Kubernetes Dashboard Helm repository
   command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
   ignore_errors: yes
 
@@ -48,7 +48,7 @@
   command: helm repo update
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Install Kubernetes Dashboard using Helm
@@ -57,7 +57,7 @@
     --namespace kubernetes-dashboard --create-namespace
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Create dashboard admin service account
@@ -70,7 +70,7 @@
       metadata:
         name: dashboard-admin
         namespace: kubernetes-dashboard
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Create cluster role binding for dashboard admin
@@ -90,7 +90,7 @@
         kind: ClusterRole
         name: cluster-admin
         apiGroup: rbac.authorization.k8s.io
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Create long-lived token for dashboard admin
@@ -106,7 +106,7 @@
         annotations:
           kubernetes.io/service-account.name: dashboard-admin
       type: kubernetes.io/service-account-token
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Wait for token to be generated
@@ -116,7 +116,7 @@
   until: token_check.stdout != ""
   retries: 10
   delay: 5
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Create Ingress manifest for Kubernetes Dashboard
@@ -125,12 +125,12 @@
     dest: /tmp/dashboard-ingress.yml
   vars:
     node_ip: "{{ node_ip }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Apply Ingress for Kubernetes Dashboard
   command: kubectl apply -f /tmp/dashboard-ingress.yml
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: no

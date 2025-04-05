@@ -1,0 +1,437 @@
+---
+# Create TLS proxy services for Traefik ingress
+- name: Create TLS-terminating service for Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: elasticsearch-tls-proxy
+        namespace: "{{ namespace }}"
+        annotations:
+          traefik.ingress.kubernetes.io/service.serversscheme: "https"
+          traefik.ingress.kubernetes.io/service.serverstls.insecureskipverify: "true"
+      spec:
+        selector:
+          elasticsearch.k8s.elastic.co/cluster-name: elasticsearch
+        ports:
+        - name: https
+          port: 9200
+          targetPort: 9200
+        type: ClusterIP
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+- name: Create TLS-terminating service for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: kibana-tls-proxy
+        namespace: "{{ namespace }}"
+        annotations:
+          traefik.ingress.kubernetes.io/service.serversscheme: "https"
+          traefik.ingress.kubernetes.io/service.serverstls.insecureskipverify: "true"
+      spec:
+        selector:
+          kibana.k8s.elastic.co/name: kibana
+        ports:
+        - name: https
+          port: 5601
+          targetPort: 5601
+        type: ClusterIP
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create Middleware for Elasticsearch
+- name: Create Middleware for Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: elasticsearch-strip-prefix
+        namespace: "{{ namespace }}"
+      spec:
+        stripPrefix:
+          prefixes:
+            - /elasticsearch
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create Middleware for Kibana
+- name: Create Middleware for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: kibana-strip-prefix
+        namespace: "{{ namespace }}"
+      spec:
+        stripPrefix:
+          prefixes:
+            - /kibana
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create URL Rewrite Middleware for Kibana
+- name: Create URL Rewrite Middleware for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: kibana-rewrite
+        namespace: "{{ namespace }}"
+      spec:
+        replacePathRegex:
+          regex: "^/kibana(.*)"
+          replacement: "/$1"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create IngressRoute for Elasticsearch
+- name: Create IngressRoute for Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: elasticsearch
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web      # HTTP on port 80
+          - websecure # HTTPS on port 443
+        routes:
+          - match: "Host(`elasticsearch.192.168.1.85`) || Host(`elasticsearch.local`) || PathPrefix(`/elasticsearch`)"
+            kind: Rule
+            services:
+              - name: elasticsearch-tls-proxy
+                port: 9200
+            middlewares:
+              - name: elasticsearch-strip-prefix
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create IngressRoute for Kibana
+- name: Create IngressRoute for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web      # HTTP on port 80
+          - websecure # HTTPS on port 443
+        routes:
+          - match: "Host(`kibana.192.168.1.85`) || Host(`kibana.local`) || PathPrefix(`/kibana`)"
+            kind: Rule
+            services:
+              - name: kibana-tls-proxy
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+            middlewares:
+              - name: kibana-strip-prefix
+        # Add TLS section for HTTPS
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Update the existing IngressRoute to use the rewrite middleware
+- name: Update IngressRoute for Kibana with rewrite middleware
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-rewrite
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana-rewrite`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+            middlewares:
+              - name: kibana-rewrite
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create IngressRoute for Kibana with basePath
+- name: Create IngressRoute for Kibana with base path
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-with-basepath
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create IngressRoute for Kibana (simplified)
+- name: Create IngressRoute for Kibana (simplified)
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-simplified
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create simplified IngressRoute for Kibana
+- name: Create simplified IngressRoute for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-final
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`) || Host(`kibana.192.168.1.85`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+        tls: {}
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create a ServersTransport resource to handle self-signed certificates
+- name: Create insecure ServersTransport for TLS services
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: ServersTransport
+      metadata:
+        name: insecure-transport
+        namespace: "{{ namespace }}"
+      spec:
+        insecureSkipVerify: true
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Create standard Kubernetes Ingress for Kibana
+- name: Create standard Kubernetes Ingress for Kibana
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata:
+        name: kibana-ingress
+        namespace: "{{ namespace }}"
+        annotations:
+          kubernetes.io/ingress.class: "traefik"
+          traefik.ingress.kubernetes.io/router.entrypoints: "web,websecure"
+          traefik.ingress.kubernetes.io/service.serversscheme: "https"
+          traefik.ingress.kubernetes.io/service.serverstls.insecureskipverify: "true"
+      spec:
+        rules:
+        - host: kibana.192.168.1.85
+          http:
+            paths:
+            - path: /
+              pathType: Prefix
+              backend:
+                service:
+                  name: kibana-kb-http
+                  port:
+                    number: 5601
+        - http:
+            paths:
+            - path: /kibana
+              pathType: Prefix
+              backend:
+                service:
+                  name: kibana-kb-http
+                  port:
+                    number: 5601
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Check Kibana custom resource for base path
+- name: Check Kibana custom resource for base path
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig }} -n {{ namespace }} get kibana kibana -o jsonpath='{.spec.http.basePath}'
+  register: kibana_base_path
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+# Debug Kibana base path
+- name: Debug Kibana base path
+  debug:
+    msg: "Kibana base path: {{ kibana_base_path.stdout | default('none') }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+
+# Display Kibana configuration
+- name: Display Kibana configuration
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig }} -n {{ namespace }} get kibana kibana -o yaml
+  register: kibana_config
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+
+# Debug Kibana configuration
+- name: Debug Kibana configuration
+  debug:
+    msg: "{{ kibana_config.stdout }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+
+# Get credentials and display access information
+- name: Get elastic user password
+  shell: |
+    kubectl --kubeconfig={{ kubeconfig }} -n {{ namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
+  register: elastic_password
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+  changed_when: false
+  no_log: true
+  ignore_errors: true
+
+# Debug message to print control_plane_ip
+- name: Debug control_plane_ip
+  debug:
+    msg: "Control plane IP value is: '{{ hostvars['NUC8i5BEHS']['ansible_host'] | default('192.168.1.85') }}'"
+  delegate_to: "{{ groups['utility'][0] }}"
+
+- name: Display access information
+  debug:
+    msg:
+      - "ECK deployment has completed successfully!"
+      - "--------------------------------------"
+      - "Direct NodePort Access:"
+      - "Elasticsearch: https://192.168.1.85:30092"
+      - "Kibana: https://192.168.1.85:30056"
+      - ""
+      - "Traefik Ingress Access:"
+      - "Elasticsearch: http://elasticsearch.192.168.1.85 or http://192.168.1.85/elasticsearch"
+      - "Kibana: http://kibana.192.168.1.85 or http://192.168.1.85/kibana"
+      - ""
+      - "Username: elastic"
+      - "Password: {{ elastic_password.stdout if elastic_password.rc == 0 else 'Could not retrieve password. Get it with: kubectl get secret elasticsearch-es-elastic-user -n elastic -o jsonpath={.data.elastic} | base64 -d' }}"
+      - "--------------------------------------"
+      - "Note: The NodePort connections use self-signed certificates."
+      - "You may need to accept security warnings in your browser."
+
+# Create TLS Configuration for Traefik
+- name: Create TLS Options for Traefik
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: TLSOption
+      metadata:
+        name: elastic-tls-options
+        namespace: "{{ namespace }}"
+      spec:
+        minVersion: VersionTLS12
+        sniStrict: false
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false
+
+# Update IngressRoute to use TLS options
+- name: Update IngressRoute for Kibana with TLS options
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: kibana-https
+        namespace: "{{ namespace }}"
+      spec:
+        entryPoints:
+          - websecure
+        routes:
+          - match: "PathPrefix(`/kibana`)"
+            kind: Rule
+            services:
+              - name: kibana-kb-http
+                port: 5601
+                scheme: https
+                serversTransport: insecure-transport
+        tls:
+          options:
+            name: elastic-tls-options
+            namespace: "{{ namespace }}"
+  delegate_to: "{{ groups['utility'][0] }}"
+  become: false

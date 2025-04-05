@@ -21,7 +21,7 @@
       loop:
         - "{{ playbook_dir }}/fetched_tokens"
         - "{{ playbook_dir }}/scripts"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     # KUBECONFIG SETUP
@@ -29,7 +29,7 @@
       stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     - name: Fetch kubeconfig from k3s server
@@ -44,7 +44,7 @@
         path: "{{ kubeconfig_path }}"
         regexp: 'https://127.0.0.1:6443'
         replace: 'https://{{ node_ip }}:6443'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       when: not kubeconfig_stat.stat.exists
 
@@ -53,14 +53,14 @@
       stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_verify
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Fail if kubeconfig still doesn't exist
       fail:
         msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Check permissions and connectivity."
       when: not kubeconfig_verify.stat.exists
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     # Add repositories before installation
@@ -69,7 +69,7 @@
         name: prometheus-community
         repo_url: https://prometheus-community.github.io/helm-charts
         kubeconfig: "{{ kubeconfig_path }}"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     # IMPROVED CLEANUP: Create a much more thorough cleanup script
@@ -220,7 +220,7 @@
           done
           
           echo "Cleanup complete!"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       when: clean_install | bool
 
@@ -228,7 +228,7 @@
     - name: Run comprehensive cleanup script
       command:
         cmd: "{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       when: clean_install | bool
       changed_when: true
@@ -241,7 +241,7 @@
         api_version: v1
         kind: Namespace
         state: present
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     # MODIFIED APPROACH: Use a custom CRD installation script
@@ -272,13 +272,13 @@
           done
           
           echo "All CRDs installed successfully!"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Run CRD installation script
       command:
         cmd: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: crd_installation
       changed_when: true
@@ -335,7 +335,7 @@
           kubelet:
             serviceMonitor:
               namespace: "{{ prometheus_namespace }}"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: prometheus_installation
 
@@ -356,7 +356,7 @@
       loop:
         - "prometheus-grafana"
         - "prometheus-kube-prometheus-operator"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     # Get Traefik NodePort and Grafana password for user information
@@ -364,7 +364,7 @@
       shell: >
         kubectl --kubeconfig="{{ kubeconfig_path }}" get svc traefik -n {{ traefik_namespace }} 
         -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: traefik_nodeport
       changed_when: false
@@ -373,7 +373,7 @@
       shell: >
         kubectl --kubeconfig="{{ kubeconfig_path }}" get secret -n {{ prometheus_namespace }} prometheus-grafana 
         -o jsonpath="{.data.admin-password}" | base64 --decode
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: grafana_password
       changed_when: false

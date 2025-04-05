@@ -5,7 +5,7 @@
     state: present
     kind: Namespace
     name: "{{ mlflow_namespace }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Create MLflow ConfigMap
@@ -23,7 +23,7 @@
         MLFLOW_BACKEND_STORE_URI: "{{ mlflow_backend_store_uri }}"
         MLFLOW_HOST: "0.0.0.0"
         MLFLOW_PORT: "{{ mlflow_service_port | string }}"  # Convert to string
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Create MLflow PVC if enabled
@@ -43,7 +43,7 @@
           requests:
             storage: "{{ mlflow_storage_size }}"
         storageClassName: "{{ mlflow_storage_class }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: mlflow_persistent_volume | bool
 
@@ -92,7 +92,7 @@
               - name: data
                 persistentVolumeClaim:
                   claimName: "{{ mlflow_release_name }}-data"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: mlflow_persistent_volume | bool
 
@@ -140,7 +140,7 @@
             volumes:
               - name: data
                 emptyDir: {}
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: not mlflow_persistent_volume | bool
 
@@ -165,7 +165,7 @@
             name: http
         selector:
           app: "{{ mlflow_release_name }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Create MLflow Traefik IngressRoute
@@ -187,7 +187,7 @@
             services:
               - name: "{{ mlflow_release_name }}"
                 port: "{{ mlflow_service_port }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: mlflow_ingress_enabled | bool
 
@@ -205,7 +205,7 @@
         stripPrefix:
           prefixes:
             - /mlflow
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Create MLflow path-based IngressRoute
@@ -229,14 +229,14 @@
             services:
               - name: "{{ mlflow_release_name }}"
                 port: "{{ mlflow_service_port }}"
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Wait for MLflow deployment to be ready
   shell: >
     kubectl --kubeconfig="{{ kubeconfig_path }}" wait deployment/{{ mlflow_release_name }} 
     --namespace={{ mlflow_namespace }} --for=condition=Available=True --timeout=300s
-  delegate_to: localhost
+  delegate_to: "{{ groups['utility'][0] }}"
   become: false
   register: mlflow_ready
   changed_when: false

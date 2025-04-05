@@ -1,0 +1,28 @@
+---
+- name: ECK Stack Verification
+  hosts: utility
+  gather_facts: false
+  tasks:
+    - name: Display verification start information
+      debug:
+        msg:
+          - "Starting ECK stack verification..."
+          - "This will check the health of ECK operator, Elasticsearch, Kibana, and Ingress configuration."
+          - "--------------------------------------"
+
+- import_playbook: verify_112_eck_operator.yml
+- import_playbook: verify_114_eck_elasticsearch.yml
+- import_playbook: verify_116_eck_kibana.yml
+- import_playbook: verify_118_eck_ingress.yml
+
+- name: Show verification completion
+  hosts: utility
+  gather_facts: false
+  tasks:
+    - name: Display verification completion information
+      debug:
+        msg:
+          - "--------------------------------------"
+          - "ECK stack verification completed successfully!"
+          - "All components are working properly."
+          - "--------------------------------------"

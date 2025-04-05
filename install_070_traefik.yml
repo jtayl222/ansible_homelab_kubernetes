@@ -15,14 +15,14 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0755'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create scripts directory
       file:
         path: "{{ playbook_dir }}/scripts"
         state: directory
         mode: '0755'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Fetch kubeconfig from k3s
       ansible.builtin.fetch:
@@ -35,14 +35,14 @@
         path: "{{ kubeconfig_path }}"
         regexp: 'https://127.0.0.1:6443'
         replace: 'https://{{ node_ip }}:6443'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Get Traefik nodePort
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} get svc traefik -n {{ traefik_namespace }}
         -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
       register: traefik_port
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       changed_when: false
 
     - name: Ensure Traefik CRDs exist
@@ -52,20 +52,20 @@
             kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
           register: crd_check
           changed_when: false
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
 
         - name: Download CRDs
           get_url:
             url: https://raw.githubusercontent.com/traefik/traefik/v2.10/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
             dest: /tmp/traefik-crds.yaml
           when: "'NO_CRD' in crd_check.stdout"
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
 
         - name: Apply CRDs
           shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-crds.yaml
           when: "'NO_CRD' in crd_check.stdout"
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create HelmChartConfig to enable dashboard
       copy:
@@ -88,12 +88,12 @@
                 websecure:
                   tls:
                     enabled: false
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply HelmChartConfig
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-helm-config.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create basic auth secret
       copy:
@@ -108,12 +108,12 @@
           stringData:
             # Updated using: htpasswd -nb admin admin
             users: "admin:$apr1$QER2W2Ka$avgZMvXUgMlrFgg4tCJDW0"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply basic auth secret
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-auth-secret.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create auth middleware
       copy:
@@ -128,12 +128,12 @@
             basicAuth:
               secret: traefik-dashboard-auth
               realm: "Traefik Dashboard"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply auth middleware
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-middleware.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create strip prefix middleware
       copy:
@@ -149,12 +149,12 @@
               prefixes:
                 - /dashboard
               forceSlash: true
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply strip prefix middleware
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-strip-prefix.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create dashboard IngressRoute
       copy:
@@ -177,12 +177,12 @@
                 middlewares:
                   - name: traefik-dashboard-auth
                   - name: strip-dashboard-prefix
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply dashboard route
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-dashboard-route.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create direct IngressRoute
       copy:
@@ -205,29 +205,29 @@
                 middlewares:
                   - name: traefik-dashboard-auth
                   - name: strip-dashboard-prefix
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply direct route
       shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-direct-dashboard-route.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Restart Traefik
       block:
         - name: Rollout restart
           shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} rollout restart deployment traefik -n {{ traefik_namespace }}
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
 
         - name: Wait for Traefik to be ready
           shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik -n {{ traefik_namespace }} --timeout=60s
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
       rescue:
         - name: Show deployment state
           shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }}
-          delegate_to: localhost
+          delegate_to: "{{ groups['utility'][0] }}"
           register: deployment_check
 
         - name: Display partial state
@@ -237,7 +237,7 @@
     - name: Pause for changes
       pause:
         seconds: 20
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create port-forward script
       copy:
@@ -256,7 +256,7 @@
           sleep 3
           xdg-open "http://localhost:9000/dashboard/" 2>/dev/null || open "http://localhost:9000/dashboard/" 2>/dev/null || echo "Open http://localhost:9000/dashboard/ manually"
           wait $PF_PID
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Final message
       debug:

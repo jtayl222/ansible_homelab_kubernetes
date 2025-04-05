@@ -16,7 +16,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0755'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     - name: Ensure scripts directory exists
@@ -24,7 +24,7 @@
         path: "{{ playbook_dir }}/scripts"
         state: directory
         mode: '0755'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     # Fetch kubeconfig from control plane to utility node
@@ -41,7 +41,7 @@
         path: "{{ local_kubeconfig }}"
         regexp: 'https://127.0.0.1:6443'
         replace: "https://{{ node_ip }}:6443"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     # Include the k8s_dashboard role with the proper kubeconfig
@@ -63,7 +63,7 @@
           metadata:
             name: "{{ dashboard_service_account }}"
             namespace: "{{ dashboard_namespace }}"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     - name: Create cluster role binding for dashboard admin
@@ -83,7 +83,7 @@
             kind: ClusterRole
             name: cluster-admin
             apiGroup: rbac.authorization.k8s.io
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     # Create the token secret
@@ -100,7 +100,7 @@
             annotations:
               kubernetes.io/service-account.name: "{{ dashboard_service_account }}"
           type: kubernetes.io/service-account-token
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     # Wait for token to be populated
@@ -111,7 +111,7 @@
       until: token_check.stdout != ""
       retries: 10
       delay: 5
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     # Extract token using the local kubeconfig
@@ -119,7 +119,7 @@
       shell: >
         kubectl --kubeconfig={{ local_kubeconfig }} -n kubernetes-dashboard get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
       register: dashboard_token
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
     - name: Display dashboard token
@@ -159,5 +159,5 @@
           
           # Wait for port-forward process to end (when user presses Ctrl+C)
           wait $PF_PID
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: no

@@ -1,8 +1,8 @@
 #!/bin/bash
 
-KUBECONFIG="/home/user/ansible_homelab_kubernetes/standalone_control_plane/fetched_tokens/k3s-kubeconfig"
+KUBECONFIG="/home/user/ansible_homelab_kubernetes/fetched_tokens/k3s-kubeconfig"
 NODE_IP="192.168.1.85"
-TRAEFIK_PORT="31605"
+TRAEFIK_PORT="31958"
 GRAFANA_PASSWORD="prom-operator"
 
 echo "========== Kubernetes Monitoring Stack =========="

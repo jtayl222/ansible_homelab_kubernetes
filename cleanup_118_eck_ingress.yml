@@ -1,0 +1,152 @@
+---
+- name: Cleanup ECK Ingress Components
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    elastic_namespace: "elastic"
+
+  tasks:
+    - name: Display cleanup information
+      debug:
+        msg: "Starting cleanup of ECK ingress components from the cluster..."
+
+    # First remove Ingress and exposed services
+    - name: Remove Elasticsearch and Kibana IngressRoutes
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - elasticsearch
+        - kibana
+        - kibana-simple
+        - kibana-final
+        - kibana-rewrite
+        - kibana-simplified
+        - kibana-with-basepath
+        - kibana-direct
+        - kibana-https
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove Elasticsearch and Kibana Middlewares
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - elasticsearch-strip-prefix
+        - kibana-strip-prefix
+        - kibana-rewrite
+        - kibana-direct-strip-prefix
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove TLS proxy services
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ item }}-tls-proxy"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - elasticsearch
+        - kibana
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove NodePort services
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - elasticsearch-es-nodeport
+        - kibana-kb-nodeport
+        - kibana-direct-nodeport
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove ServersTransport resources
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: ServersTransport
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - insecure-transport
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove TLS Options
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: TLSOption
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - elastic-tls-options
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Remove Ingress resources
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: "{{ item }}"
+            namespace: "{{ elastic_namespace }}"
+      loop:
+        - kibana-ingress
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+
+    - name: Display cleanup completion message
+      debug:
+        msg:
+          - "ECK ingress components cleanup has completed."
+          - "--------------------------------------"
+          - "The following components have been removed:"
+          - "- Elasticsearch and Kibana IngressRoutes"
+          - "- Elasticsearch and Kibana Middlewares"
+          - "- TLS proxy services"
+          - "- NodePort services"
+          - "- ServersTransport resources"
+          - "--------------------------------------"
