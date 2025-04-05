@@ -12,7 +12,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0700'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       run_once: true
   

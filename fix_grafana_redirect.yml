@@ -16,7 +16,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: '0755'
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
     
     - name: Get traefik port
@@ -24,7 +24,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} get svc -n {{ traefik_namespace }} traefik 
         -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
       register: traefik_port
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
     
     # Step 1: Add proper redirect middleware to handle trailing slashes
@@ -42,13 +42,13 @@
               regex: ^(http://{{ node_ip }}:{{ traefik_port.stdout }}/grafana)$$
               replacement: $${1}/
               permanent: true
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Apply redirect middleware
       command: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-redirect-middleware.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     # Step 2: Create improved strip prefix middleware
@@ -66,13 +66,13 @@
               prefixes:
                 - /grafana
               forceSlash: true
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Apply strip middleware
       command: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-strip-middleware.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     # Step 3: Create comprehensive IngressRoute with middleware chain
@@ -106,13 +106,13 @@
                 services:
                   - name: {{ grafana_release_name }}
                     port: 80
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Apply improved IngressRoute
       command: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/grafana-improved-route.yaml
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
     
     # Step 4: Update Grafana to handle subpaths correctly
@@ -127,7 +127,7 @@
               serve_from_sub_path: true
           service:
             type: ClusterIP
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
     
     - name: Update Grafana with corrected settings
@@ -136,7 +136,7 @@
         grafana/grafana --namespace {{ grafana_namespace }} 
         --values {{ playbook_dir }}/fetched_tokens/grafana-subpath-fix.yaml 
         --reuse-values
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     # Wait for Grafana to be ready
@@ -144,7 +144,7 @@
       command: >
         kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment {{ grafana_release_name }} 
         -n {{ grafana_namespace }}
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     # Step 5: Create a robust test script
@@ -196,7 +196,7 @@
           
           echo
           echo "For manual testing, open: http://$NODE_IP:$PORT/grafana/"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
       
     - name: Display next steps
@@ -210,5 +210,5 @@
           - "Access Grafana at:"
           - "http://{{ node_ip }}:{{ traefik_port.stdout }}/grafana/"
           - "-----------------------------------------------------"
-      delegate_to: localhost
+      delegate_to: "{{ groups['utility'][0] }}"
       become: false
