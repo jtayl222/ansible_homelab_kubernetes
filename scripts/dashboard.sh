@@ -1,5 +1,5 @@
 #!/bin/bash
-KUBECONFIG="/home/user/ansible_homelab_kubernetes/standalone_control_plane/fetched_tokens/k3s-kubeconfig"
+KUBECONFIG="/home/user/ansible_homelab_kubernetes/fetched_tokens/k3s-kubeconfig"
 
 echo "Starting port-forward to Traefik..."
 echo "Use http://localhost:9000/dashboard/"

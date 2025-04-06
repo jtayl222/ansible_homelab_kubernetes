@@ -1,0 +1,48 @@
+---
+# install_120_mlflow.yml
+- name: Deploy MLflow on K3s
+  hosts: utility  # We run commands from utility node
+  become: false
+  vars:
+    mlflow_db_password: "{{ lookup('ansible.builtin.password', '/dev/null length=15') }}"
+  tasks:
+    - name: Create MLflow namespace
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: mlflow
+
+    - name: Deploy PostgreSQL for MLflow
+      kubernetes.core.helm.helm:
+        name: mlflow-postgres
+        chart_ref: bitnami/postgresql
+        release_namespace: mlflow
+        values:
+          postgresqlUsername: mlflow
+          postgresqlPassword: "{{ mlflow_db_password }}"
+          postgresqlDatabase: mlflow
+          persistence:
+            storageClass: nfs-client
+            size: 10Gi
+
+    - name: Deploy MLflow server
+      kubernetes.core.helm.helm:
+        name: mlflow
+        chart_ref: https://github.com/community-charts/helm-charts/releases/download/mlflow-0.7.19/mlflow-0.7.19.tgz  # Using a community chart
+        release_namespace: mlflow
+        values:
+          backendStore:
+            databaseConnectionString: "postgresql://mlflow:{{ mlflow_db_password }}@mlflow-postgres:5432/mlflow"
+          defaultArtifactRoot: "nfs://{{ hostvars['U850']['ansible_host'] }}:/srv/nfs/mlflow-artifacts"
+          service:
+            type: ClusterIP
+          ingress:
+            enabled: true
+            hosts:
+              - host: mlflow.local  # Adjust based on your domain setup
+                paths:
+                  - path: /
+                    pathType: Prefix
