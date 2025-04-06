@@ -4,10 +4,12 @@
   become: true
   gather_facts: true
   tasks:
-    - name: Install NFS server packages
+    - name: Ensure required packages are installed
       apt:
         name:
           - nfs-kernel-server
+          - nfs-common
+          - rpcbind
         state: present
         update_cache: yes
 
@@ -28,34 +30,86 @@
         owner: nobody
         group: nogroup
 
-    - name: Configure exports file
-      lineinfile:
-        path: /etc/exports
-        line: '/srv/nfs/kubernetes 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)'
-        create: yes
-      register: exports_config
+    - name: Create subdirectory for Elasticsearch data
+      file:
+        path: "/srv/nfs/kubernetes/elasticsearch"
+        state: directory
+        mode: '0777'
+        owner: nobody
+        group: nogroup
 
-    - name: Apply NFS export configuration
+    - name: Create subdirectory for Kibana data
+      file:
+        path: "/srv/nfs/kubernetes/kibana"
+        state: directory
+        mode: '0777'
+        owner: nobody
+        group: nogroup
+
+    - name: Create subdirectory for MLflow data
+      file:
+        path: "/srv/nfs/kubernetes/mlflow"
+        state: directory
+        mode: '0777'
+        owner: nobody
+        group: nogroup
+
+    - name: Ensure exports file exists with correct content
+      copy:
+        content: '/srv/nfs/kubernetes 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)'
+        dest: /etc/exports
+        owner: root
+        group: root
+        mode: '0644'
+      register: exports_file
+
+    - name: Stop NFS and RPC services for clean restart
+      systemd:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - nfs-server
+        - rpcbind
+      ignore_errors: yes
+
+    - name: Reload systemd daemon
+      systemd:
+        daemon_reload: yes
+
+    - name: Ensure rpcbind is started first
+      systemd:
+        name: rpcbind
+        state: started
+        enabled: yes
+      register: rpcbind_started
+
+    - name: Apply NFS exports
       command: exportfs -ra
-      when: exports_config.changed
+      when: exports_file.changed or rpcbind_started.changed
 
-    - name: Start and enable NFS server
+    - name: Ensure NFS server is started
       systemd:
         name: nfs-server
-        state: restarted
+        state: started
         enabled: yes
+      register: nfs_server_started
 
-    # Check if ufw is installed first
-    - name: Check if ufw is installed
-      command: which ufw
-      register: ufw_check
-      failed_when: false
+    # Simple portable network verification - check if ports are listening
+    - name: Verify NFS ports are open
+      shell: ss -tuln | grep -E '(111|2049)'
+      register: nfs_ports
+      failed_when: nfs_ports.rc != 0
       changed_when: false
 
-    # Only run if ufw is installed
-    - name: Allow NFS through firewall
-      ufw:
-        rule: allow
-        port: nfs
-      when: ufw_check.rc == 0
-      ignore_errors: yes
+    - name: Verify exports are available
+      shell: showmount -e localhost
+      register: nfs_exports
+      failed_when: nfs_exports.rc != 0
+      changed_when: false
+
+    - name: Display NFS configuration status
+      debug:
+        msg:
+          - "NFS server configured successfully"
+          - "Exports: {{ nfs_exports.stdout_lines }}"
+          - "Open ports: {{ nfs_ports.stdout_lines }}"
