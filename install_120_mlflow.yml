@@ -1,48 +1,267 @@
 ---
 # install_120_mlflow.yml
-- name: Deploy MLflow on K3s
-  hosts: utility  # We run commands from utility node
-  become: false
+- name: Install and Configure MLflow
+  hosts: utility
+  gather_facts: true
   vars:
-    mlflow_db_password: "{{ lookup('ansible.builtin.password', '/dev/null length=15') }}"
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    mlflow_namespace: "mlflow"
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    mlflow_pvc_size: "10Gi"
+    mlflow_nodeport: 30120
+    mlflow_image: "ghcr.io/mlflow/mlflow:v2.9.2"
+    mlflow_artifacts_path: "/mnt/mlflow"
+    mlflow_host: "mlflow.{{ control_plane_ip }}.nip.io"
+
   tasks:
-    - name: Create MLflow namespace
+    # Check prerequisites
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
+      when: not kubeconfig_stat.stat.exists
+
+    # Check if MLflow is already installed
+    - name: Check if MLflow is already deployed
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ mlflow_namespace }} -o name 2>/dev/null || echo "not found"
+      register: mlflow_ns_check
+      become: false
+      changed_when: false
+
+    - name: Display MLflow installation status
+      debug:
+        msg: "MLflow namespace: {{ 'Already exists' if 'not found' not in mlflow_ns_check.stdout else 'Will be created' }}"
+
+    # Clean up any failed deployment first
+    - name: Check if previous failed deployment exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get deployment mlflow -o name 2>/dev/null || echo "not found"
+      register: mlflow_deployment_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: "'not found' not in mlflow_ns_check.stdout"
+
+    - name: Clean up previous failed deployment if exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} delete deployment mlflow 2>/dev/null || echo "not found"
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: "mlflow_deployment_check is defined and 'not found' not in mlflow_deployment_check.stdout"
+
+    # Create namespace if needed
+    - name: Create MLflow namespace if it doesn't exist
       kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: mlflow
+            name: "{{ mlflow_namespace }}"
+      become: false
+      when: "'not found' in mlflow_ns_check.stdout"
 
-    - name: Deploy PostgreSQL for MLflow
-      kubernetes.core.helm.helm:
-        name: mlflow-postgres
-        chart_ref: bitnami/postgresql
-        release_namespace: mlflow
-        values:
-          postgresqlUsername: mlflow
-          postgresqlPassword: "{{ mlflow_db_password }}"
-          postgresqlDatabase: mlflow
-          persistence:
-            storageClass: nfs-client
-            size: 10Gi
+    # Create PVC for MLflow artifacts
+    - name: Create PVC for MLflow artifacts
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: mlflow-artifacts
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteMany
+            resources:
+              requests:
+                storage: "{{ mlflow_pvc_size }}"
+            storageClassName: nfs-client
+      become: false
 
+    # Deploy MLflow server - FIXED COMMAND
     - name: Deploy MLflow server
-      kubernetes.core.helm.helm:
-        name: mlflow
-        chart_ref: https://github.com/community-charts/helm-charts/releases/download/mlflow-0.7.19/mlflow-0.7.19.tgz  # Using a community chart
-        release_namespace: mlflow
-        values:
-          backendStore:
-            databaseConnectionString: "postgresql://mlflow:{{ mlflow_db_password }}@mlflow-postgres:5432/mlflow"
-          defaultArtifactRoot: "nfs://{{ hostvars['U850']['ansible_host'] }}:/srv/nfs/mlflow-artifacts"
-          service:
-            type: ClusterIP
-          ingress:
-            enabled: true
-            hosts:
-              - host: mlflow.local  # Adjust based on your domain setup
-                paths:
-                  - path: /
-                    pathType: Prefix
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: mlflow
+            namespace: "{{ mlflow_namespace }}"
+            labels:
+              app: mlflow
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: mlflow
+            template:
+              metadata:
+                labels:
+                  app: mlflow
+              spec:
+                containers:
+                - name: mlflow
+                  image: "{{ mlflow_image }}"
+                  ports:
+                  - containerPort: 5000
+                    name: http
+                  command: ["mlflow"]  # Fixed: Use the mlflow command
+                  args:
+                  - "server"
+                  - "--host=0.0.0.0"
+                  - "--port=5000"
+                  - "--default-artifact-root=file:{{ mlflow_artifacts_path }}"
+                  - "--serve-artifacts"
+                  volumeMounts:
+                  - name: mlflow-artifacts
+                    mountPath: "{{ mlflow_artifacts_path }}"
+                volumes:
+                - name: mlflow-artifacts
+                  persistentVolumeClaim:
+                    claimName: mlflow-artifacts
+      become: false
+
+    # Create MLflow service
+    - name: Create MLflow service
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: mlflow
+            namespace: "{{ mlflow_namespace }}"
+            labels:
+              app: mlflow
+          spec:
+            ports:
+            - port: 5000
+              targetPort: 5000
+              protocol: TCP
+              name: http
+            selector:
+              app: mlflow
+      become: false
+
+    # Create NodePort service for MLflow
+    - name: Create NodePort service for MLflow
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: mlflow-nodeport
+            namespace: "{{ mlflow_namespace }}"
+            labels:
+              app: mlflow
+          spec:
+            type: NodePort
+            ports:
+            - port: 5000
+              targetPort: 5000
+              nodePort: "{{ mlflow_nodeport }}"
+              protocol: TCP
+              name: http
+            selector:
+              app: mlflow
+      become: false
+
+    # Create Traefik IngressRoute for MLflow
+    - name: Create Traefik IngressRoute for MLflow
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: mlflow-ingress
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            entryPoints:
+              - web
+              - websecure
+            routes:
+              - match: Host(`{{ mlflow_host }}`)
+                kind: Rule
+                services:
+                  - name: mlflow
+                    port: 5000
+      become: false
+
+    # Wait for deployment to be ready
+    - name: Wait for MLflow deployment to be ready
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} rollout status deployment mlflow --timeout=180s
+      register: mlflow_rollout
+      become: false
+      changed_when: false
+
+    # Check logs to ensure everything is working
+    - name: Check MLflow pod logs
+      shell: |
+        POD_NAME=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pods -l app=mlflow -o jsonpath='{.items[0].metadata.name}')
+        if [ -n "$POD_NAME" ]; then
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} logs $POD_NAME --tail=20
+        else
+          echo "No MLflow pod found"
+        fi
+      register: mlflow_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      
+    - name: Display MLflow pod logs
+      debug:
+        msg: "{{ mlflow_logs.stdout_lines }}"
+
+    - name: Verify MLflow pod is running
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pods -l app=mlflow -o jsonpath='{.items[0].status.phase}'
+      register: mlflow_pod_status
+      become: false
+      changed_when: false
+      until: mlflow_pod_status.stdout == "Running"
+      retries: 10
+      delay: 15
+
+    - name: Test MLflow access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
+      register: mlflow_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Display installation summary
+    - name: Display MLflow installation summary
+      debug:
+        msg:
+          - "==================== MLFLOW INSTALLATION SUMMARY ===================="
+          - "MLflow has been successfully deployed."
+          - ""
+          - "Access URLs:"
+          - "- MLflow UI via NodePort: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
+          - "- MLflow UI via Ingress: http://{{ mlflow_host }}/"
+          - ""
+          - "MLflow Connection Details:"
+          - "- Tracking URI: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
+          - "- Artifact Root: file:{{ mlflow_artifacts_path }}"
+          - ""
+          - "Verify installation with: ansible-playbook -i inventory/hosts verify_120_mlflow.yml"
+          - "=================================================================="

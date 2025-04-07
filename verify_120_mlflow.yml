@@ -1,0 +1,174 @@
+---
+# filepath: /home/user/ansible_homelab_kubernetes/verify_120_mlflow.yml
+- name: Verify MLflow Deployment
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    mlflow_namespace: "mlflow"
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    mlflow_nodeport: 30120
+    mlflow_host: "mlflow.{{ control_plane_ip }}.nip.io"
+
+  tasks:
+    # Check if MLflow namespace exists
+    - name: Check if MLflow namespace exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ mlflow_namespace }} -o name 2>/dev/null || echo "not found"
+      register: mlflow_ns
+      become: false
+      changed_when: false
+
+    - name: Display MLflow namespace status
+      debug:
+        msg: "MLflow namespace: {{ 'Found' if 'not found' not in mlflow_ns.stdout else 'Not found' }}"
+      
+    - name: Fail if MLflow namespace doesn't exist
+      fail:
+        msg: "MLflow namespace not found. Please run install_120_mlflow.yml first."
+      when: "'not found' in mlflow_ns.stdout"
+
+    # Check if MLflow pod is running
+    - name: Verify MLflow pods are running
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pods -l app=mlflow -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
+      register: mlflow_pods
+      become: false
+      changed_when: false
+
+    - name: Display MLflow pod status
+      debug:
+        msg: "MLflow pods: {{ mlflow_pods.stdout }}"
+
+    # Get pod details
+    - name: Get MLflow pod details
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pods -l app=mlflow -o wide
+      register: mlflow_pod_details
+      become: false
+      changed_when: false
+
+    - name: Display MLflow pod details
+      debug:
+        msg: "{{ mlflow_pod_details.stdout_lines }}"
+
+    # Check if services are available
+    - name: Verify MLflow services
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get services -l app=mlflow -o wide
+      register: mlflow_services
+      become: false
+      changed_when: false
+
+    - name: Display MLflow service details
+      debug:
+        msg: "{{ mlflow_services.stdout_lines }}"
+
+    # Check NodePort service
+    - name: Verify MLflow NodePort service
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get service mlflow-nodeport -o jsonpath='{.spec.ports[0].nodePort}'
+      register: nodeport_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Check ingress
+    - name: Verify MLflow IngressRoute
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroutes -n {{ mlflow_namespace }} mlflow-ingress -o name 2>/dev/null || echo "not found"
+      register: ingress_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Test access
+    - name: Test MLflow API access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/api/2.0/mlflow/experiments/list
+      register: mlflow_api_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Test MLflow UI access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
+      register: mlflow_ui_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Test MLflow UI access via Ingress
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" -H "Host: {{ mlflow_host }}" http://{{ control_plane_ip }}/
+      register: mlflow_ingress_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Check for PVC
+    - name: Verify MLflow PVC
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pvc mlflow-artifacts -o jsonpath='{.status.phase}'
+      register: mlflow_pvc
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Check logs for errors
+    - name: Check MLflow logs for errors
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} logs -l app=mlflow --tail=20 | grep -i error || echo "No errors found in recent logs"
+      register: mlflow_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Set verification status
+    - name: Set verification status
+      set_fact:
+        mlflow_healthy: >-
+          {{
+            'Running' in mlflow_pods.stdout and
+            nodeport_check.stdout == mlflow_nodeport|string and
+            'not found' not in ingress_check.stdout and
+            mlflow_api_access.stdout == '200' and
+            mlflow_ui_access.stdout == '200' and
+            mlflow_pvc.stdout == 'Bound'
+          }}
+
+    # Display summary
+    - name: Display MLflow verification results
+      debug:
+        msg:
+          - "MLflow Verification Results:"
+          - "--------------------------------------"
+          - "MLflow deployment exists: {{ 'Yes' if 'Running' in mlflow_pods.stdout else 'No' }}"
+          - "MLflow services: {{ 'Configured' if mlflow_services.stdout_lines|length > 0 else 'Not configured' }}"
+          - "NodePort service ({{ mlflow_nodeport }}): {{ 'Available' if nodeport_check.stdout == mlflow_nodeport|string else 'Not available' }}"
+          - "IngressRoute: {{ 'Configured' if 'not found' not in ingress_check.stdout else 'Not configured' }}"
+          - "PVC Status: {{ mlflow_pvc.stdout if mlflow_pvc.stdout else 'Not available' }}"
+          - "API access: {{ mlflow_api_access.stdout if mlflow_api_access.stdout else 'Failed' }}"
+          - "UI access via NodePort: {{ mlflow_ui_access.stdout if mlflow_ui_access.stdout else 'Failed' }}"
+          - "UI access via Ingress: {{ mlflow_ingress_access.stdout if mlflow_ingress_access.stdout else 'Failed' }}"
+          - "Recent log entries: {{ (mlflow_logs.stdout_lines | join(' '))[:200] + '...' if mlflow_logs.stdout_lines | length > 0 else 'Could not retrieve logs' }}"
+          - "--------------------------------------"
+          - "Overall status: {{ 'HEALTHY' if mlflow_healthy else 'ISSUES DETECTED' }}"
+
+    # Access information
+    - name: Display MLflow access information
+      debug:
+        msg:
+          - "MLflow Access Information:"
+          - "--------------------------------------"
+          - "NodePort URL: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
+          - "Ingress URL: http://{{ mlflow_host }}/"
+          - "MLflow Tracking URI for clients: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}"
+          - "--------------------------------------"
+
+    # Fail if not healthy and force_fail is true
+    - name: Fail if MLflow is not healthy (with override option)
+      fail:
+        msg: "MLflow verification failed. See output above for details."
+      when: not mlflow_healthy and (force_fail | default(false))

@@ -1,0 +1,84 @@
+---
+# filepath: /home/user/ansible_homelab_kubernetes/cleanup_120_mlflow.yml
+- name: Clean up MLflow Deployment
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    mlflow_namespace: "mlflow"
+    
+  tasks:
+    # Check if MLflow namespace exists
+    - name: Check if MLflow namespace exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ mlflow_namespace }} -o name 2>/dev/null || echo "not found"
+      register: mlflow_ns
+      become: false
+      changed_when: false
+
+    - name: Skip cleanup if MLflow namespace doesn't exist
+      debug:
+        msg: "MLflow namespace not found. Nothing to clean up."
+      when: "'not found' in mlflow_ns.stdout"
+
+    # Proceed with cleanup if namespace exists
+    - name: Proceed with cleanup
+      when: "'not found' not in mlflow_ns.stdout"
+      block:
+        - name: Delete MLflow IngressRoute
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} delete ingressroute mlflow-ingress 2>/dev/null || echo "No IngressRoute found"
+          register: ingress_deleted
+          become: false
+          changed_when: "'deleted' in ingress_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete MLflow services
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} delete svc mlflow mlflow-nodeport 2>/dev/null || echo "No services found"
+          register: services_deleted
+          become: false
+          changed_when: "'deleted' in services_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete MLflow deployment
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} delete deployment mlflow 2>/dev/null || echo "No deployment found"
+          register: deployment_deleted
+          become: false
+          changed_when: "'deleted' in deployment_deleted.stdout"
+          ignore_errors: true
+
+        - name: Wait for pods to terminate
+          pause:
+            seconds: 10
+          when: deployment_deleted.changed
+
+        - name: Delete MLflow PVC
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} delete pvc mlflow-artifacts 2>/dev/null || echo "No PVC found"
+          register: pvc_deleted
+          become: false
+          changed_when: "'deleted' in pvc_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete MLflow namespace
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} delete namespace {{ mlflow_namespace }} 2>/dev/null || echo "Cannot delete namespace"
+          register: namespace_deleted
+          become: false
+          changed_when: "'deleted' in namespace_deleted.stdout"
+          ignore_errors: true
+
+    # Display cleanup summary
+    - name: Display cleanup summary
+      debug:
+        msg:
+          - "========== MLFLOW CLEANUP SUMMARY =========="
+          - "IngressRoute: {{ 'Deleted' if ingress_deleted.changed | default(false) else 'Not found or not deleted' }}"
+          - "Services: {{ 'Deleted' if services_deleted.changed | default(false) else 'Not found or not deleted' }}"
+          - "Deployment: {{ 'Deleted' if deployment_deleted.changed | default(false) else 'Not found or not deleted' }}"
+          - "PVC: {{ 'Deleted' if pvc_deleted.changed | default(false) else 'Not found or not deleted' }}"
+          - "Namespace: {{ 'Deleted' if namespace_deleted.changed | default(false) else 'Not found or not deleted' }}"
+          - "========================================="
+      when: "'not found' not in mlflow_ns.stdout"
