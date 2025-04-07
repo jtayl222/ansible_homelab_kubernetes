@@ -1,0 +1,214 @@
+---
+# filepath: /home/user/ansible_homelab_kubernetes/uninstall_130_argo_workflows.yml
+- name: Uninstall Argo Workflows
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    argo_namespace: "argo"
+    
+  tasks:
+    # Check if kubeconfig exists
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with uninstallation."
+      when: not kubeconfig_stat.stat.exists
+
+    # Check if Argo namespace exists
+    - name: Check if Argo namespace exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ argo_namespace }} -o name 2>/dev/null || echo "not found"
+      register: argo_ns
+      become: false
+      changed_when: false
+
+    - name: Skip cleanup if Argo namespace doesn't exist
+      debug:
+        msg: "Argo namespace not found. Nothing to clean up."
+      when: "'not found' in argo_ns.stdout"
+
+    # Proceed with cleanup if namespace exists
+    - name: Proceed with cleanup
+      when: "'not found' not in argo_ns.stdout"
+      block:
+        - name: Delete any submitted workflows
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete workflows --all 2>/dev/null || echo "No workflows found"
+          register: workflows_deleted
+          become: false
+          changed_when: "'deleted' in workflows_deleted.stdout"
+          ignore_errors: true
+          
+        - name: Delete workflow templates
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete workflowtemplates --all 2>/dev/null || echo "No workflow templates found"
+          register: templates_deleted
+          become: false
+          changed_when: "'deleted' in templates_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete Traefik IngressRoute
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete ingressroute argo-workflows-ingress 2>/dev/null || echo "No IngressRoute found"
+          register: ingress_deleted
+          become: false
+          changed_when: "'deleted' in ingress_deleted.stdout"
+          ignore_errors: true
+          
+        - name: Delete NodePort service (for Helm install)
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete service argo-workflows-nodeport 2>/dev/null || echo "No NodePort service found"
+          register: nodeport_deleted_helm
+          become: false
+          changed_when: "'deleted' in nodeport_deleted_helm.stdout"
+          ignore_errors: true
+
+        - name: Delete NodePort service (for manifest install)
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete service argo-server-nodeport 2>/dev/null || echo "No NodePort service found"
+          register: nodeport_deleted_manifest
+          become: false
+          changed_when: "'deleted' in nodeport_deleted_manifest.stdout"
+          ignore_errors: true
+
+        - name: Delete Artifact Repository ConfigMap
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete configmap artifact-repositories 2>/dev/null || echo "No ConfigMap found"
+          register: configmap_deleted
+          become: false
+          changed_when: "'deleted' in configmap_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete Argo Server Auth Config
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete configmap argo-server-auth-config 2>/dev/null || echo "No Auth Config found"
+          register: auth_config_deleted
+          become: false
+          changed_when: "'deleted' in auth_config_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete Argo SSO Secret
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete secret argo-server-sso 2>/dev/null || echo "No Secret found"
+          register: sso_secret_deleted
+          become: false
+          changed_when: "'deleted' in sso_secret_deleted.stdout"
+          ignore_errors: true
+          
+        - name: Try uninstalling Helm release if it exists
+          kubernetes.core.helm:
+            kubeconfig: "{{ kubeconfig_path }}"
+            release_name: argo-workflows
+            release_namespace: "{{ argo_namespace }}"
+            state: absent
+          become: false
+          ignore_errors: true
+          register: helm_deleted
+
+        - name: Delete Argo Workflows installation via kubectl (for manifest install)
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} delete --namespace {{ argo_namespace }} --filename https://github.com/argoproj/argo-workflows/releases/download/v3.6.5/install.yaml 2>/dev/null || echo "Manifest resources not found or already deleted"
+          register: manifest_deleted
+          become: false
+          changed_when: "'deleted' in manifest_deleted.stdout"
+          ignore_errors: true
+
+        - name: Delete PVC for Argo artifacts
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete pvc argo-artifacts 2>/dev/null || echo "No PVC found"
+          register: pvc_deleted
+          become: false
+          changed_when: "'deleted' in pvc_deleted.stdout"
+          ignore_errors: true
+          
+        - name: Check for remaining custom resources
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep argoproj.io 2>/dev/null || echo "No Argo CRDs found"
+          register: crd_check
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Display custom resources that may need cleanup
+          debug:
+            msg: "{{ crd_check.stdout_lines }}"
+          when: "'No Argo CRDs found' not in crd_check.stdout"
+          
+        - name: Delete Argo CRDs if they exist
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} delete crd workflows.argoproj.io workflowtemplates.argoproj.io 2>/dev/null || echo "No Argo CRDs found"
+          register: crd_deleted
+          become: false
+          changed_when: "'deleted' in crd_deleted.stdout"
+          ignore_errors: true
+          
+        - name: Wait for resources to be deleted
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get all
+          register: remaining_resources
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Display remaining resources
+          debug:
+            msg: "{{ remaining_resources.stdout_lines }}"
+          when: remaining_resources.stdout | length > 0
+
+        - name: Delete Argo namespace
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} delete namespace {{ argo_namespace }} --timeout=30s
+          become: false
+          register: namespace_deleted
+          changed_when: true
+          ignore_errors: true
+          
+        # Final verification
+        - name: Verify Argo namespace is deleted
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ argo_namespace }} -o name 2>/dev/null || echo "Namespace deleted successfully"
+          register: verify_ns_deleted
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Display verification result
+          debug:
+            msg: "Verification: {{ verify_ns_deleted.stdout }}"
+
+    # Display uninstallation summary
+    - name: Display uninstallation summary
+      debug:
+        msg: |
+          ==================== ARGO WORKFLOWS UNINSTALLATION SUMMARY ====================
+          Status: {{ 'Successfully uninstalled' if 'not found' in argo_ns.stdout or 'Namespace deleted successfully' in verify_ns_deleted.stdout else 'Uninstallation had issues - check output' }}
+          
+          Details:
+          {% if 'not found' not in argo_ns.stdout %}
+          - Workflows Deletion: {{ 'Success' if workflows_deleted.rc == 0 else 'Failed or not found' }}
+          - Templates Deletion: {{ 'Success' if templates_deleted.rc == 0 else 'Failed or not found' }}
+          - Ingress Deletion: {{ 'Success' if ingress_deleted.rc == 0 else 'Failed or not found' }}
+          - NodePort Service Deletion: 
+              - For Helm Install: {{ 'Success' if nodeport_deleted_helm.rc == 0 else 'Failed or not found' }}
+              - For Manifest Install: {{ 'Success' if nodeport_deleted_manifest.rc == 0 else 'Failed or not found' }}
+          - ConfigMap Deletion: {{ 'Success' if configmap_deleted.rc == 0 else 'Failed or not found' }}
+          - Auth Config Deletion: {{ 'Success' if auth_config_deleted.rc == 0 else 'Failed or not found' }}
+          - SSO Secret Deletion: {{ 'Success' if sso_secret_deleted.rc == 0 else 'Failed or not found' }}
+          - Helm Release Deletion: {{ 'Attempted' }}
+          - Manifest Resources Deletion: {{ 'Success' if manifest_deleted.rc == 0 else 'Failed or not found' }}
+          - PVC Deletion: {{ 'Success' if pvc_deleted.rc == 0 else 'Failed or not found' }}
+          - CRD Deletion: {{ 'Success' if crd_deleted.rc == 0 else 'Failed or not found' }}
+          - Namespace Deletion: {{ 'Success' if namespace_deleted.rc == 0 else 'Failed - may need manual cleanup' }}
+          {% else %}
+          - No Argo Workflows installation found
+          {% endif %}
+          
+          Next Steps:
+          - If any resources couldn't be deleted, you may need to manually clean them up
+          - If namespace is stuck in 'Terminating' state, check for finalizers
+          ==================================================================

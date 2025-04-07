@@ -1,0 +1,381 @@
+---
+# filepath: /home/user/ansible_homelab_kubernetes/verify_130_argo_workflows.yml
+- name: Verify Argo Workflows Installation
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    argo_namespace: "argo"
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    argo_host: "argo.{{ control_plane_ip }}.nip.io"
+    argo_nodeport: 30130
+    
+  tasks:
+    # 1. Check if kubeconfig exists
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with verification."
+      when: not kubeconfig_stat.stat.exists
+
+    # 2. Check if Argo namespace exists
+    - name: Check if Argo namespace exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ argo_namespace }} -o name 2>/dev/null || echo "not found"
+      register: argo_ns
+      become: false
+      changed_when: false
+
+    - name: Fail if Argo namespace doesn't exist
+      fail:
+        msg: "Argo namespace not found. Please install Argo Workflows first."
+      when: "'not found' in argo_ns.stdout"
+
+    # 3. Check Argo deployments
+    - name: Check Argo Server deployment
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.availableReplicas}'
+      register: argo_server_replicas
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check Argo Workflow Controller deployment
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.availableReplicas}'
+      register: argo_controller_replicas
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 4. Check pods for errors
+    - name: Get all pods in Argo namespace
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready
+      register: argo_pods
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 5. Get logs from pods if they're not running correctly
+    - name: Get logs from Argo Server if not running correctly
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs deployment/argo-server --tail=50
+      register: argo_server_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: argo_server_replicas.stdout is not defined or argo_server_replicas.stdout == "0"
+
+    - name: Get logs from Workflow Controller if not running correctly
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs deployment/workflow-controller --tail=50
+      register: argo_controller_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: argo_controller_replicas.stdout is not defined or argo_controller_replicas.stdout == "0"
+
+    # 6. Check for NodePort service
+    - name: Check any NodePort services for Argo
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get svc -o jsonpath="{range .items[?(@.spec.type=='NodePort')]}{.metadata.name}{' '}{end}"
+      register: nodeport_services
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get nodeport for argo-server services
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get svc {{ item }} -o jsonpath='{.spec.ports[0].nodePort}'
+      register: nodeport_values
+      with_items: "{{ nodeport_services.stdout.split() }}"
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: nodeport_services.stdout != ""
+
+    # 7. Check IngressRoute
+    - name: Check IngressRoute
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get ingressroute argo-workflows-ingress -o name 2>/dev/null || echo "not found"
+      register: ingress_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 8. Check if Argo UI is accessible via NodePort
+    - name: Test Argo UI via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      register: nodeport_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 9. Test Argo UI via Ingress
+    - name: Test Argo UI via Ingress
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ argo_host }}/
+      register: ingress_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 10. Check if CRDs are installed
+    - name: Check Argo Workflows CRDs
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get crd workflows.argoproj.io workflowtemplates.argoproj.io -o name 2>/dev/null || echo "not found"
+      register: crd_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 11. Check if example workflow template exists
+    - name: Check example workflow template
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get workflowtemplate hello-world-template -o name 2>/dev/null || echo "not found"
+      register: template_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 12. Describe services for debugging
+    - name: Describe NodePort service
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe svc argo-server-nodeport
+      register: nodeport_describe
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: nodeport_access.rc != 0
+
+    - name: Describe Argo Server service
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe svc argo-server
+      register: argo_server_svc_describe
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: nodeport_access.rc != 0 or ingress_access.rc != 0
+
+    # 13. Check network access with netcat
+    - name: Check network connectivity to NodePort
+      shell: |
+        nc -zv {{ control_plane_ip }} {{ argo_nodeport }} -w 5 2>&1 || echo "Connection failed"
+      register: netcat_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: nodeport_access.rc != 0
+
+    # 14. Try to submit a test workflow
+    - name: Submit test workflow if CRDs are ready
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} create -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: verify-
+        spec:
+          entrypoint: hello
+          templates:
+          - name: hello
+            container:
+              image: alpine:3.14
+              command: [echo, "Verification workflow submitted successfully"]
+        EOF
+      register: workflow_submit
+      become: false
+      changed_when: "'created' in workflow_submit.stdout"
+      ignore_errors: true
+      when: "'not found' not in crd_check.stdout"
+
+    # 15. Get server endpoints and config
+    - name: Get Argo Server endpoints
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get endpoints argo-server -o jsonpath='{.subsets[0].addresses[0].ip}'
+      register: argo_server_ip
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Argo Server configuration
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.spec.template.spec.containers[0].args}'
+      register: argo_server_args
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Argo Server environment variables
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.spec.template.spec.containers[0].env[*].name}'
+      register: argo_server_env
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Add this to check authentication configuration
+    - name: Get full Argo Server deployment config
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o yaml
+      register: full_server_config
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display Argo authentication config
+      debug:
+        msg: 
+          - "Argo Server Authentication Configuration:"
+          - "{{ full_server_config.stdout | regex_search('--auth-mode=[^\\s]*') | default('Auth mode not explicitly set') }}"
+          - "{{ full_server_config.stdout | regex_search('--secure=[^\\s]*') | default('Secure mode not explicitly set') }}"
+
+    # 16. Display verification summary with simpler template
+    - name: Display basic Argo Workflows verification summary
+      debug:
+        msg:
+          - "==================== ARGO WORKFLOWS VERIFICATION SUMMARY ===================="
+          - "Status Overview:"
+          - "- Argo Namespace: {{ 'Found' if 'not found' not in argo_ns.stdout else 'Not found' }}"
+          - "- Argo Server: {{ 'Running (' + argo_server_replicas.stdout + ' replicas)' if argo_server_replicas.stdout is defined and argo_server_replicas.stdout != '0' else 'Not running' }}"
+          - "- Workflow Controller: {{ 'Running (' + argo_controller_replicas.stdout + ' replicas)' if argo_controller_replicas.stdout is defined and argo_controller_replicas.stdout != '0' else 'Not running' }}"
+          - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing' }}"
+          - ""
+          - "Access Verification:"
+          - "- NodePort Service: {{ 'Available' if nodeport_check.rc == 0 else 'Not found' }}"
+          - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout else 'Not found' }}"
+          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.stdout + ')' if nodeport_access.rc == 0 else 'Not accessible' }}"
+          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.stdout + ')' if ingress_access.rc == 0 else 'Not accessible' }}"
+          - ""
+          - "Resource Verification:"
+          - "- Example Template: {{ 'Found' if 'not found' not in template_check.stdout else 'Not found' }}"
+          - "- Test Workflow Submission: {{ 'Successful' if workflow_submit.rc == 0 else 'Failed or skipped' }}"
+
+    # 17. Display pods status as separate debug task
+    - name: Display Argo pod status
+      debug:
+        msg: "{{ argo_pods.stdout }}"
+      when: argo_pods.stdout is defined
+
+    # 18. Display logs if components are not running
+    - name: Display Argo Server logs if not running
+      debug:
+        msg: "{{ argo_server_logs.stdout_lines | default(['No logs available']) }}"
+      when: (argo_server_replicas.stdout is not defined or argo_server_replicas.stdout == "0") and argo_server_logs is defined
+
+    - name: Display Workflow Controller logs if not running
+      debug:
+        msg: "{{ argo_controller_logs.stdout_lines | default(['No logs available']) }}"
+      when: (argo_controller_replicas.stdout is not defined or argo_controller_replicas.stdout == "0") and argo_controller_logs is defined
+
+    # 19. Display configuration details
+    - name: Display configuration details
+      debug:
+        msg:
+          - "Configuration:"
+          - "- Server Args: {{ argo_server_args.stdout | default('Not available') }}"
+          - "- Server Environment: {{ argo_server_env.stdout | default('Not available') }}"
+          - "- Server Endpoints: {{ argo_server_ip.stdout | default('Not available') }}"
+
+    # 20. Display network connectivity info
+    - name: Display network connectivity information
+      debug:
+        msg: "Network Connectivity Test: {{ netcat_check.stdout | default('Not tested') }}"
+      when: nodeport_access.rc != 0 and netcat_check is defined
+
+    # 21. Display troubleshooting tips
+    - name: Display troubleshooting tips
+      debug:
+        msg:
+          - "Troubleshooting Tips:"
+          - "- If server is running but UI not accessible, check firewall settings"
+          - "- If CRDs are missing, the controller may not have completed installation"
+          - "- Look at pod logs for detailed error messages"
+          - "- Ensure NodePort service selector matches the pod labels"
+          - "- For manual fixes, SSH into the control plane and check logs with: kubectl -n {{ argo_namespace }} logs deployment/argo-server"
+          - "- If verification failed, try reinstalling with: ansible-playbook -i inventory/hosts install_130_argo_workflows.yml"
+
+    # 22. Check NodePort service selectors
+    - name: Get NodePort service selectors
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get svc argo-server-nodeport -o jsonpath='{.spec.selector}'
+      register: nodeport_selectors
+      become: false
+      changed_when: false
+
+    # Add this at the end of the verification playbook
+    - name: Ask if authentication should be fixed
+      pause:
+        prompt: "Would you like to patch Argo Server to use server-only authentication? (yes/no)"
+      register: fix_auth
+      when: nodeport_access.rc != 0 or ingress_access.rc != 0
+
+    - name: Patch Argo Server authentication if requested
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type=json -p='[
+          {
+            "op": "add", 
+            "path": "/spec/template/spec/containers/0/env", 
+            "value": [
+              {"name": "ARGO_SERVER_AUTH_MODE", "value": "server"},
+              {"name": "ARGO_SERVER_SECURE", "value": "false"}
+            ]
+          }
+        ]'
+      register: fix_auth_result
+      become: false
+      changed_when: "'patched' in fix_auth_result.stdout"
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes"
+      ignore_errors: true
+
+    - name: Try alternative patch approach if first attempt failed
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type=merge -p='{
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [{
+                  "name": "argo-server",
+                  "env": [
+                    {"name": "ARGO_SERVER_AUTH_MODE", "value": "server"},
+                    {"name": "ARGO_SERVER_SECURE", "value": "false"}
+                  ]
+                }]
+              }
+            }
+          }
+        }'
+      register: fix_auth_result_alt
+      become: false
+      changed_when: "'patched' in fix_auth_result_alt.stdout"
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc != 0
+      ignore_errors: true
+
+    - name: Wait for patched Argo Server to restart if fixed
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment argo-server --timeout=60s
+      register: rollout_after_fix
+      become: false
+      changed_when: false
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc == 0
+      ignore_errors: true
+
+    - name: Test access again after fix
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      register: nodeport_access_after_fix
+      become: false
+      changed_when: false
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc == 0
+      ignore_errors: true
+
+    - name: Display results after fix
+      debug:
+        msg: "Access after fix: {{ 'Success (HTTP ' + nodeport_access_after_fix.stdout + ')' if nodeport_access_after_fix.rc == 0 else 'Still not accessible' }}"
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc == 0

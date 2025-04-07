@@ -12,6 +12,10 @@
     mlflow_image: "ghcr.io/mlflow/mlflow:v2.9.2"
     mlflow_artifacts_path: "/mnt/mlflow"
     mlflow_host: "mlflow.{{ control_plane_ip }}.nip.io"
+    # TLS configuration
+    enable_tls: true
+    tls_cert_file: "/tmp/mlflow-certs/tls.crt"
+    tls_key_file: "/tmp/mlflow-certs/tls.key"
 
   tasks:
     # Check prerequisites
@@ -111,9 +115,23 @@
                 labels:
                   app: mlflow
               spec:
+                initContainers:
+                - name: volume-permissions
+                  image: busybox:latest
+                  command: 
+                  - sh
+                  - -c
+                  - |
+                    mkdir -p /mnt/mlflow
+                    chmod -R 777 /mnt/mlflow
+                    echo "Ensuring all required permissions are set"
+                  volumeMounts:
+                  - name: mlflow-artifacts
+                    mountPath: "/mnt/mlflow"
                 containers:
                 - name: mlflow
                   image: "{{ mlflow_image }}"
+                  imagePullPolicy: IfNotPresent
                   ports:
                   - containerPort: 5000
                     name: http
@@ -124,6 +142,28 @@
                   - "--port=5000"
                   - "--default-artifact-root=file:{{ mlflow_artifacts_path }}"
                   - "--serve-artifacts"
+                  env:
+                  - name: MLFLOW_ARTIFACTS_PATH
+                    value: "/mnt/mlflow"
+                  readinessProbe:
+                    httpGet:
+                      path: /
+                      port: 5000
+                    initialDelaySeconds: 10
+                    periodSeconds: 10
+                  livenessProbe:
+                    httpGet:
+                      path: /
+                      port: 5000
+                    initialDelaySeconds: 30
+                    periodSeconds: 20
+                  resources:
+                    requests:
+                      memory: "512Mi"
+                      cpu: "100m"
+                    limits:
+                      memory: "1Gi"
+                      cpu: "500m"
                   volumeMounts:
                   - name: mlflow-artifacts
                     mountPath: "{{ mlflow_artifacts_path }}"
@@ -202,6 +242,122 @@
                 services:
                   - name: mlflow
                     port: 5000
+            tls:
+              secretName: mlflow-tls
+      become: false
+
+    # Create middleware for proper routing
+    - name: Create strip prefix middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: mlflow-strip-prefix
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            stripPrefix:
+              prefixes:
+                - /mlflow
+      become: false
+
+    - name: Create headers middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: mlflow-headers
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Script-Name: "/mlflow"
+              customResponseHeaders:
+                Access-Control-Allow-Origin: "*"
+      become: false
+
+    # Create IngressRoute for path-based access
+    - name: Create path-based IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: mlflow-path
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            entryPoints:
+              - web
+              - websecure
+            routes:
+              - match: PathPrefix(`/mlflow`)
+                kind: Rule
+                services:
+                  - name: mlflow
+                    port: 5000
+                middlewares:
+                  - name: mlflow-strip-prefix
+                    namespace: "{{ mlflow_namespace }}"
+                  - name: mlflow-headers
+                    namespace: "{{ mlflow_namespace }}"
+            tls: {}
+      become: false
+      when: enable_tls
+
+    # Generate TLS certificates for secure access if enabled
+    - name: Create directory for certificates
+      file:
+        path: /tmp/mlflow-certs
+        state: directory
+        mode: '0755'
+      become: false
+      when: enable_tls
+
+    - name: Generate self-signed certificate for MLflow
+      shell: |
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+          -keyout {{ tls_key_file }} -out {{ tls_cert_file }} \
+          -subj "/CN={{ mlflow_host }}/O=MLflow K3s"
+      args:
+        creates: "{{ tls_cert_file }}"
+      become: false
+      when: enable_tls
+
+    - name: Create TLS secret for MLflow
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} create secret tls mlflow-tls \
+          --key {{ tls_key_file }} --cert {{ tls_cert_file }} --dry-run=client -o yaml | \
+          kubectl --kubeconfig={{ kubeconfig_path }} apply -f -
+      become: false
+      when: enable_tls
+
+    # Create a persist-data ConfigMap with script to ensure data persistence
+    - name: Create persistence ConfigMap
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: mlflow-persistence
+            namespace: "{{ mlflow_namespace }}"
+          data:
+            ensure-persistence.sh: |
+              #!/bin/sh
+              # This script ensures proper permissions and persistence
+              mkdir -p ${MLFLOW_ARTIFACTS_PATH}
+              chmod -R 777 ${MLFLOW_ARTIFACTS_PATH}
+              echo "MLflow artifact directory is configured for persistence"
+              # Keep container running so volume remains mounted
+              exec "$@"
       become: false
 
     # Wait for deployment to be ready
@@ -240,13 +396,54 @@
       retries: 10
       delay: 15
 
-    - name: Test MLflow access via NodePort
+    # Test access methods
+    - name: Test MLflow path-based access
       shell: |
-        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
-      register: mlflow_access
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}/mlflow/
+      register: mlflow_path_access
       become: false
       changed_when: false
       ignore_errors: true
+
+    - name: Test MLflow host-based access
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" -H "Host: {{ mlflow_host }}" http://{{ control_plane_ip }}/
+      register: mlflow_host_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Test MLflow direct NodePort access
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
+      register: mlflow_nodeport_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Make a test file to verify persistence
+    - name: Create test file to verify persistence
+      shell: |
+        POD_NAME=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} get pods -l app=mlflow -o jsonpath='{.items[0].metadata.name}')
+        if [ -n "$POD_NAME" ]; then
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} exec $POD_NAME -- sh -c 'echo "Test data for persistence" > /mnt/mlflow/persistence-test.txt'
+        else
+          echo "No MLflow pod found"
+        fi
+      register: persistence_test
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # Display access status
+    - name: Display access test results
+      debug:
+        msg:
+          - "Access test results:"
+          - "- Path-based access (/mlflow/): {{ mlflow_path_access.stdout if mlflow_path_access.rc == 0 else 'Failed - ' + mlflow_path_access.stderr }}"
+          - "- Host-based access ({{ mlflow_host }}): {{ mlflow_host_access.stdout if mlflow_host_access.rc == 0 else 'Failed - ' + mlflow_host_access.stderr }}"
+          - "- NodePort access (port {{ mlflow_nodeport }}): {{ mlflow_nodeport_access.stdout if mlflow_nodeport_access.rc == 0 else 'Failed - ' + mlflow_nodeport_access.stderr }}"
+          - "- Persistence test: {{ 'Success' if persistence_test.rc == 0 else 'Failed - ' + persistence_test.stderr }}"
 
     # Display installation summary
     - name: Display MLflow installation summary
@@ -257,11 +454,28 @@
           - ""
           - "Access URLs:"
           - "- MLflow UI via NodePort: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
-          - "- MLflow UI via Ingress: http://{{ mlflow_host }}/"
+          - "- MLflow UI via Path-based routing: http://{{ control_plane_ip }}/mlflow/"
+          - "- MLflow UI via Host-based routing: http://{{ mlflow_host }}/"
+          - "{% if enable_tls %}- MLflow UI via HTTPS (secure): https://{{ mlflow_host }}/{% endif %}"
           - ""
           - "MLflow Connection Details:"
           - "- Tracking URI: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
           - "- Artifact Root: file:{{ mlflow_artifacts_path }}"
           - ""
+          - "Persistence:"
+          - "- MLflow data is stored in a persistent volume that will survive reboots"
+          - "- Init container ensures proper permissions on each startup"
+          - "- To confirm persistence after reboot, check for file: persistence-test.txt"
+          - ""
+          - "Traefik Configuration:"
+          - "- Path-based routing with prefix stripping enabled"
+          - "- Host-based routing for clean URLs"
+          - "- Custom headers middleware for proper API functionality"
+          - "{% if enable_tls %}- TLS enabled with self-signed certificate{% endif %}"
+          - ""
+          - "Health & Monitoring:"
+          - "- Readiness probe configured for proper load balancing"
+          - "- Liveness probe configured for automatic recovery"
+          - "- Resource limits set for stability"
           - "Verify installation with: ansible-playbook -i inventory/hosts verify_120_mlflow.yml"
           - "=================================================================="

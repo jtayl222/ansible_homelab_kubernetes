@@ -1,0 +1,342 @@
+---
+# filepath: /home/user/ansible_homelab_kubernetes/install_130_argo_workflows.yml
+- name: Install and Configure Argo Workflows
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    argo_namespace: "argo"
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    argo_version: "v3.6.5"  # Match version to available manifests
+    argo_host: "argo.{{ control_plane_ip }}.nip.io"
+    argo_nodeport: 30130
+    argo_artifacts_pvc: "argo-artifacts"
+    argo_artifacts_size: "10Gi"
+
+  tasks:
+    # 1. Check prerequisites
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
+      when: not kubeconfig_stat.stat.exists
+
+    # 2. Check for previous installation
+    - name: Check if Argo Workflows is already installed
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ argo_namespace }} -o name 2>/dev/null || echo "not found"
+      register: argo_ns_check
+      become: false
+      changed_when: false
+
+    - name: Display Argo installation status
+      debug:
+        msg: "Argo namespace: {{ 'Already exists' if 'not found' not in argo_ns_check.stdout else 'Will be created' }}"
+
+    # 3. Create namespace if needed
+    - name: Create Argo namespace if it doesn't exist
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Namespace
+          metadata:
+            name: "{{ argo_namespace }}"
+      become: false
+      when: "'not found' in argo_ns_check.stdout"
+
+    # 4. Create PVC for Argo artifacts
+    - name: Create PVC for Argo artifacts
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: "{{ argo_artifacts_pvc }}"
+            namespace: "{{ argo_namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteMany
+            resources:
+              requests:
+                storage: "{{ argo_artifacts_size }}"
+            storageClassName: nfs-client
+      become: false
+
+    # 5. Install Argo Workflows from official manifests
+    - name: Install Argo Workflows manifests
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f https://github.com/argoproj/argo-workflows/releases/download/{{ argo_version }}/install.yaml
+      register: install_result
+      become: false
+      changed_when: "'created' in install_result.stdout or 'configured' in install_result.stdout"
+      
+    - name: Display installation results
+      debug:
+        msg: "{{ install_result.stdout_lines }}"
+      when: install_result.stdout | length > 0
+
+    # 6. Check available env vars and arguments for argo-server
+    - name: Get argo-server deployment info
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o yaml
+      register: argo_server_info
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 7. Configure controller with default artifact repository
+    - name: Create ConfigMap for artifact repository configuration
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: artifact-repositories
+            namespace: "{{ argo_namespace }}"
+          data:
+            default-v1: |
+              archiveLogs: true
+              s3:
+                bucket: my-bucket
+                endpoint: minio.minio:9000
+                insecure: true
+                accessKeySecret:
+                  name: my-minio-cred
+                  key: accesskey
+                secretKeySecret:
+                  name: my-minio-cred
+                  key: secretkey
+      become: false
+
+    # 8. Create NodePort service for direct access
+    - name: Create NodePort service for Argo UI
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: argo-server-nodeport
+            namespace: "{{ argo_namespace }}"
+          spec:
+            type: NodePort
+            ports:
+            - port: 2746
+              targetPort: 2746
+              nodePort: "{{ argo_nodeport }}"
+              protocol: TCP
+              name: http
+            selector:
+              app: argo-server
+      become: false
+
+    # 9. Create Traefik IngressRoute
+    - name: Create Traefik IngressRoute for Argo UI
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: argo-workflows-ingress
+            namespace: "{{ argo_namespace }}"
+          spec:
+            entryPoints:
+              - web
+              - websecure
+            routes:
+              - match: Host(`{{ argo_host }}`)
+                kind: Rule
+                services:
+                  - name: argo-server
+                    port: 2746
+      become: false
+
+    # 10. Wait for deployments to be ready - with increased timeouts
+    - name: Wait for Argo Workflows controller deployment to be ready
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment workflow-controller --timeout=300s
+      register: argo_controller_rollout
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Wait for Argo Workflows server deployment to be ready
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment argo-server --timeout=300s
+      register: argo_server_rollout
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 11. Set environment variables for Argo Server authentication mode
+    - name: Patch Argo Server to use environment variables for auth
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type=json -p='[
+          {
+            "op": "add", 
+            "path": "/spec/template/spec/containers/0/env", 
+            "value": [
+              {"name": "ARGO_SERVER_AUTH_MODE", "value": "server"},
+              {"name": "ARGO_SERVER_SECURE", "value": "false"}
+            ]
+          }
+        ]'
+      register: patch_env_result
+      become: false
+      changed_when: "'patched' in patch_env_result.stdout"
+      ignore_errors: true
+
+    # 12. Patch Argo Server to explicitly disable SSO and use server mode
+    - name: Patch Argo Server to explicitly disable SSO and use server mode
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type=json -p='[
+          {
+            "op": "replace", 
+            "path": "/spec/template/spec/containers/0/args", 
+            "value": ["--auth-mode=server", "--secure=false"]
+          }
+        ]'
+      register: patch_args_result
+      become: false
+      changed_when: "'patched' in patch_args_result.stdout"
+      ignore_errors: true
+
+    # 13. Wait for Argo Workflows CRDs to be established
+    - name: Wait for Argo Workflows CRDs to be established
+      shell: |
+        for i in {1..15}; do
+          if kubectl --kubeconfig={{ kubeconfig_path }} get crd workflows.argoproj.io >/dev/null 2>&1 && \
+             kubectl --kubeconfig={{ kubeconfig_path }} get crd workflowtemplates.argoproj.io >/dev/null 2>&1; then
+            echo "CRDs are ready"
+            exit 0
+          fi
+          echo "Waiting for CRDs to be established... attempt $i"
+          sleep 10
+        done
+        echo "CRDs not ready after timeout"
+        exit 1
+      register: crd_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 14. Wait after patching
+    - name: Allow time for argo-server to restart after patching
+      pause:
+        seconds: 30
+      when: "'patched' in patch_env_result.stdout"
+
+    # 15. Wait for the new argo-server pods to be ready
+    - name: Wait for patched Argo Server to restart
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment argo-server --timeout=300s
+      register: argo_server_restart
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 16. Create a basic workflow template example if CRDs are ready
+    - name: Create example workflow template using kubectl
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} apply -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: WorkflowTemplate
+        metadata:
+          name: hello-world-template
+        spec:
+          entrypoint: main
+          templates:
+          - name: main
+            container:
+              image: alpine:3.14
+              command: [sh, -c]
+              args: ["echo 'Hello World'; sleep 5; echo 'Workflow completed'"]
+              resources:
+                limits:
+                  memory: 32Mi
+                  cpu: 100m
+        EOF
+      register: template_result
+      become: false
+      changed_when: "'created' in template_result.stdout or 'configured' in template_result.stdout"
+      ignore_errors: true
+      when: crd_check.rc == 0
+
+    # 17. Test Argo access via NodePort
+    - name: Test Argo UI access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      register: argo_ui_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 18. Submit a test workflow if CRDs are ready
+    - name: Submit test workflow using kubectl
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} create -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: hello-world-
+        spec:
+          entrypoint: whalesay
+          templates:
+          - name: whalesay
+            container:
+              image: docker/whalesay:latest
+              command: [cowsay]
+              args: ["Hello from Argo Workflows!"]
+        EOF
+      register: test_workflow
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: crd_check.rc == 0
+
+    # 19. Display installation summary
+    - name: Display Argo Workflows installation summary
+      debug:
+        msg:
+          - "==================== ARGO WORKFLOWS INSTALLATION SUMMARY ===================="
+          - "Argo Workflows has been installed using the official manifests."
+          - ""
+          - "Access URLs:"
+          - "- Argo UI via NodePort: http://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+          - "- Argo UI via Ingress: http://{{ argo_host }}/"
+          - ""
+          - "Components Deployed:"
+          - "- Argo Server Status: {{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment had issues' }}"
+          - "- Argo Controller Status: {{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment had issues' }}"
+          - "- Auth Config Applied: {{ 'Yes' if patch_env_result.rc == 0 else 'No - may need manual configuration' }}"
+          - "- Workflow Template Example: {{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready yet' }}"
+          - ""
+          - "Storage Configuration:"
+          - "- Artifacts PVC: {{ argo_artifacts_pvc }} ({{ argo_artifacts_size }})"
+          - "- Storage Class: nfs-client"
+          - ""
+          - "Access Status:"
+          - "- UI Access: {{ argo_ui_access.stdout if argo_ui_access.rc == 0 else 'Failed - see verification output' }}"
+          - "- Test Workflow: {{ 'Submitted successfully' if test_workflow.rc == 0 else 'Failed - see verification output' }}"
+          - "- CRD Status: {{ 'Ready' if crd_check.rc == 0 else 'Not ready - allow more time' }}"
+          - ""
+          - "Next Steps:"
+          - "1. Access the Argo UI to view and manage workflows"
+          - "2. Use the example template to create your own workflows"
+          - "3. For CLI usage, install the argo CLI tool"
+          - ""
+          - "Verify installation with: ansible-playbook -i inventory/hosts verify_130_argo_workflows.yml"
+          - "=================================================================="
