@@ -123,7 +123,7 @@ This repository includes playbooks to deploy MLflow, a platform for the machine 
 
 2. Clean up MLflow if needed:
    ```bash
-   ansible-playbook -i inventory/my_inventory.yml cleanup_mlflow.yml
+   ansible-playbook -i inventory/my_inventory.yml uninstall_mlflow.yml
    ```
 
 ### MLflow Configuration

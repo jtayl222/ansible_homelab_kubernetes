@@ -227,7 +227,7 @@
     # Run the comprehensive cleanup script
     - name: Run comprehensive cleanup script
       command:
-        cmd: "{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh"
+        cmd: "{{ playbook_dir }}/fetched_tokens/comprehensive_uninstall.sh"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       when: clean_install | bool
