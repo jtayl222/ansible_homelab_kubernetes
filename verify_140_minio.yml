@@ -1,0 +1,148 @@
+---
+- name: Verify MinIO Installation
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    minio_namespace: "minio"
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    minio_host: "minio.{{ control_plane_ip }}.nip.io"
+    minio_console_host: "minio-console.{{ control_plane_ip }}.nip.io"
+    minio_nodeport: 30140
+    minio_console_nodeport: 30141
+    minio_access_key: "minioadmin"
+    minio_secret_key: "minioadmin"
+    
+  tasks:
+    # 1. Check if kubeconfig exists
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with verification."
+      when: not kubeconfig_stat.stat.exists
+
+    # 2. Check if MinIO namespace exists
+    - name: Check if MinIO namespace exists
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ minio_namespace }} -o name 2>/dev/null || echo "not found"
+      register: minio_ns
+      become: false
+      changed_when: false
+
+    - name: Fail if MinIO namespace doesn't exist
+      fail:
+        msg: "MinIO namespace not found. Please install MinIO first."
+      when: "'not found' in minio_ns.stdout"
+
+    # 3. Check MinIO deployment
+    - name: Check MinIO deployment status
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get deployment minio -o jsonpath='{.status.availableReplicas}'
+      register: minio_replicas
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 4. Check services
+    - name: Check MinIO API service
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio -o name 2>/dev/null || echo "not found"
+      register: minio_svc
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check MinIO NodePort services
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio-nodeport minio-console-nodeport -o name 2>/dev/null
+      register: nodeport_svcs
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 5. Check IngressRoutes
+    - name: Check IngressRoutes
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get ingressroute minio-api-ingress minio-console-ingress -o name 2>/dev/null
+      register: ingress_routes
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 6. Test API access
+    - name: Test MinIO API access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live
+      register: api_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 7. Test Console access
+    - name: Test MinIO Console access via NodePort
+      shell: |
+        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/
+      register: console_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+      
+    # 8. Test S3 operations with mc
+    - name: Install MinIO Client if needed
+      shell: |
+        if ! command -v /tmp/mc &> /dev/null; then
+          curl -Lo /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+          chmod +x /tmp/mc
+        fi
+      become: false
+      changed_when: false
+      
+    - name: Test MinIO with S3 operations
+      shell: |
+        /tmp/mc alias set myminio http://{{ control_plane_ip }}:{{ minio_nodeport }} {{ minio_access_key }} {{ minio_secret_key }}
+        /tmp/mc mb --ignore-existing myminio/verify-bucket
+        echo "test data" > /tmp/test-file.txt
+        /tmp/mc cp /tmp/test-file.txt myminio/verify-bucket/
+        /tmp/mc ls myminio/verify-bucket/
+      register: s3_test
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 9. Display verification summary
+    - name: Display MinIO verification summary
+      debug:
+        msg:
+          - "==================== MINIO VERIFICATION SUMMARY ===================="
+          - "Status Overview:"
+          - "- MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)' if minio_replicas.stdout is defined and minio_replicas.stdout != '0' else 'Not running' }}"
+          - "- Services: {{ 'Available' if 'not found' not in minio_svc.stdout else 'Not found' }}"
+          - "- NodePort Services: {{ 'Available' if nodeport_svcs.rc == 0 else 'Not found' }}"
+          - "- IngressRoutes: {{ 'Available' if ingress_routes.rc == 0 else 'Not found' }}"
+          - ""
+          - "Access Verification:"
+          - "- API via NodePort: {{ 'Accessible (HTTP ' + api_access.stdout + ')' if api_access.rc == 0 else 'Not accessible' }}"
+          - "- Console via NodePort: {{ 'Accessible (HTTP ' + console_access.stdout + ')' if console_access.rc == 0 else 'Not accessible' }}"
+          - "- S3 Operations Test: {{ 'Successful' if s3_test.rc == 0 else 'Failed - see output below' }}"
+          - ""
+          - "Access Information:"
+          - "- MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/ or http://{{ minio_host }}/"
+          - "- MinIO Console: http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/ or http://{{ minio_console_host }}/"
+          - "- Username: {{ minio_access_key }}"
+          - "- Password: {{ minio_secret_key }}"
+          - ""
+          - "Troubleshooting:"
+          - "- If API is not accessible, check pod logs: kubectl -n {{ minio_namespace }} logs deploy/minio"
+          - "- If console won't load, try accessing with a different browser"
+          - "- For connectivity issues, ensure NodePorts are not blocked by firewall"
+          - "=================================================================="
+
+    # 10. Display S3 test details if failed
+    - name: Display S3 test output
+      debug:
+        msg: "{{ s3_test.stdout_lines | default(['No output available']) }}"
+      when: s3_test.rc != 0
