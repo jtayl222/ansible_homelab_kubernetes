@@ -1,3 +1,4 @@
+# Description: This playbook installs the Prometheus and Grafana stack on a k3s cluster.
 ---
 - name: Install Prometheus and Grafana Stack
   hosts: k3s_control_plane
@@ -10,8 +11,6 @@
     grafana_release_name: grafana
     node_ip: "{{ ansible_default_ipv4.address }}"
     traefik_namespace: kube-system
-    clean_install: true  # Set to false if you want to preserve existing resources
-    
   tasks:
     - name: Ensure directories exist
       file:
@@ -24,7 +23,6 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
-    # KUBECONFIG SETUP
     - name: Check if kubeconfig exists
       stat:
         path: "{{ kubeconfig_path }}"
@@ -38,7 +36,7 @@
         dest: "{{ kubeconfig_path }}"
         flat: yes
       when: not kubeconfig_stat.stat.exists
-      
+
     - name: Update kubeconfig server address
       ansible.builtin.replace:
         path: "{{ kubeconfig_path }}"
@@ -48,14 +46,13 @@
       become: false
       when: not kubeconfig_stat.stat.exists
 
-    # Verify kubeconfig exists before proceeding
     - name: Verify kubeconfig exists
       stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_verify
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      
+
     - name: Fail if kubeconfig still doesn't exist
       fail:
         msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Check permissions and connectivity."
@@ -63,7 +60,6 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
-    # Add repositories before installation
     - name: Add Prometheus Helm repository
       kubernetes.core.helm_repository:
         name: prometheus-community
@@ -72,168 +68,20 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
-    # IMPROVED CLEANUP: Create a much more thorough cleanup script
-    - name: Create comprehensive cleanup script
-      copy:
-        dest: "{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh"
-        mode: '0755'
-        content: |
-          #!/bin/bash
-          
-          KUBECONFIG="{{ kubeconfig_path }}"
-          RELEASE="{{ prometheus_release_name }}"
-          NAMESPACE="{{ prometheus_namespace }}"
-          
-          echo "Starting comprehensive cleanup of Prometheus resources..."
-          
-          # Remove Helm release first
-          echo "Removing Helm release $RELEASE if it exists..."
-          helm --kubeconfig=$KUBECONFIG uninstall $RELEASE -n $NAMESPACE --wait || true
-          
-          # Clean up cross-namespace resources in kube-system
-          echo "Cleaning up resources in kube-system namespace..."
-          NAMESPACES_TO_CHECK="kube-system default $NAMESPACE"
-          
-          for NS in $NAMESPACES_TO_CHECK; do
-            echo "Checking namespace: $NS"
-            
-            # Services
-            kubectl --kubeconfig=$KUBECONFIG get services -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting Service in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete service $res -n $NS --ignore-not-found=true
-            done
-            
-            # ServiceMonitors
-            kubectl --kubeconfig=$KUBECONFIG get servicemonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting ServiceMonitor in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete servicemonitor $res -n $NS --ignore-not-found=true
-            done
-            
-            # PodMonitors
-            kubectl --kubeconfig=$KUBECONFIG get podmonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting PodMonitor in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete podmonitor $res -n $NS --ignore-not-found=true
-            done
-            
-            # PrometheusRules
-            kubectl --kubeconfig=$KUBECONFIG get prometheusrules -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting PrometheusRule in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete prometheusrule $res -n $NS --ignore-not-found=true
-            done
-            
-            # Deployments
-            kubectl --kubeconfig=$KUBECONFIG get deployments -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting Deployment in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete deployment $res -n $NS --ignore-not-found=true
-            done
-            
-            # StatefulSets
-            kubectl --kubeconfig=$KUBECONFIG get statefulsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting StatefulSet in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete statefulset $res -n $NS --ignore-not-found=true
-            done
-            
-            # DaemonSets
-            kubectl --kubeconfig=$KUBECONFIG get daemonsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting DaemonSet in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete daemonset $res -n $NS --ignore-not-found=true
-            done
-            
-            # Ingresses
-            kubectl --kubeconfig=$KUBECONFIG get ingress -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting Ingress in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete ingress $res -n $NS --ignore-not-found=true
-            done
-            
-            # ConfigMaps
-            kubectl --kubeconfig=$KUBECONFIG get configmaps -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting ConfigMap in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete configmap $res -n $NS --ignore-not-found=true
-            done
-            
-            # Secrets
-            kubectl --kubeconfig=$KUBECONFIG get secrets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              if [[ $res != *"default-token"* ]]; then
-                echo "Deleting Secret in $NS: $res"
-                kubectl --kubeconfig=$KUBECONFIG delete secret $res -n $NS --ignore-not-found=true
-              fi
-            done
-            
-            # Endpoints
-            kubectl --kubeconfig=$KUBECONFIG get endpoints -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-            while read res; do
-              echo "Deleting Endpoint in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete endpoint $res -n $NS --ignore-not-found=true
-            done
-          done
-          
-          # Clean up cluster-scoped resources
-          echo "Cleaning up cluster-scoped resources..."
-          
-          # Clean up ClusterRoles
-          kubectl --kubeconfig=$KUBECONFIG get clusterroles | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting ClusterRole: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete clusterrole $res --ignore-not-found=true
-          done
-          
-          # Clean up ClusterRoleBindings
-          kubectl --kubeconfig=$KUBECONFIG get clusterrolebindings | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting ClusterRoleBinding: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete clusterrolebinding $res --ignore-not-found=true
-          done
-          
-          # Clean up ValidatingWebhookConfigurations
-          kubectl --kubeconfig=$KUBECONFIG get validatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting ValidatingWebhookConfiguration: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete validatingwebhookconfigurations $res --ignore-not-found=true
-          done
-          
-          # Clean up MutatingWebhookConfigurations
-          kubectl --kubeconfig=$KUBECONFIG get mutatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting MutatingWebhookConfiguration: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete mutatingwebhookconfigurations $res --ignore-not-found=true
-          done
-          
-          # Delete the monitoring namespace if it exists
-          echo "Deleting the $NAMESPACE namespace..."
-          kubectl --kubeconfig=$KUBECONFIG delete namespace $NAMESPACE --ignore-not-found=true
-          
-          # Wait for namespace to be fully deleted
-          echo "Waiting for namespace deletion to complete..."
-          while kubectl --kubeconfig=$KUBECONFIG get namespace $NAMESPACE >/dev/null 2>&1; do
-            echo "Namespace $NAMESPACE still exists, waiting..."
-            sleep 5
-          done
-          
-          echo "Cleanup complete!"
+    # Fail if Prometheus already exists
+    - name: Check if Prometheus release exists
+      shell: |
+        helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
       delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      when: clean_install | bool
+      register: existing_prometheus
+      changed_when: false
+      failed_when: false
 
-    # Run the comprehensive cleanup script
-    - name: Run comprehensive cleanup script
-      command:
-        cmd: "{{ playbook_dir }}/fetched_tokens/comprehensive_uninstall.sh"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      when: clean_install | bool
-      changed_when: true
-      
-    # Create namespace fresh
+    - name: Fail if Prometheus is already installed
+      fail:
+        msg: "Prometheus release {{ prometheus_release_name }} detected: remove or clean up first!"
+      when: existing_prometheus.stdout | length > 0
+
     - name: Create monitoring namespace
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -243,8 +91,7 @@
         state: present
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      
-    # MODIFIED APPROACH: Use a custom CRD installation script
+
     - name: Create CRD installation script
       copy:
         dest: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
@@ -252,10 +99,7 @@
         content: |
           #!/bin/bash
           set -e
-          
           KUBECONFIG="{{ kubeconfig_path }}"
-          
-          # Create CRDs with openAPIV3Schema validation disabled to avoid size limit issues
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_alertmanagerconfigs.yaml
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
@@ -264,17 +108,12 @@
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
           kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml
-          
-          # Wait for CRDs to be established
           for CRD in alertmanagerconfigs alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
-            echo "Waiting for $CRD CRD to be established..."
             kubectl --kubeconfig=$KUBECONFIG wait --for condition=established --timeout=60s crd/${CRD}.monitoring.coreos.com
           done
-          
-          echo "All CRDs installed successfully!"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      
+
     - name: Run CRD installation script
       command:
         cmd: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
@@ -282,16 +121,15 @@
       become: false
       register: crd_installation
       changed_when: true
-      
-    # Now install kube-prometheus-stack
+
     - name: Install kube-prometheus-stack
       kubernetes.core.helm:
         name: "{{ prometheus_release_name }}"
         chart_ref: prometheus-community/kube-prometheus-stack
         release_namespace: "{{ prometheus_namespace }}"
-        create_namespace: true
+        create_namespace: false
         kubeconfig: "{{ kubeconfig_path }}"
-        skip_crds: true  # Skip CRDs since we installed them manually
+        skip_crds: true
         values:
           grafana:
             service:
@@ -301,7 +139,6 @@
               ingressClassName: traefik
               path: /grafana
               pathType: Prefix
-            # Add these grafana configuration values for subpath support
             grafana.ini:
               server:
                 domain: "{{ node_ip }}"
@@ -320,7 +157,6 @@
               ingressClassName: traefik
               path: /alertmanager
               pathType: Prefix
-          # Disable monitoring of kube-system components to avoid conflicts
           kubeControllerManager:
             enabled: false
           kubeScheduler:
@@ -331,7 +167,6 @@
             enabled: false
           nodeExporter:
             enabled: true
-          # Make kubelet monitor use the monitoring namespace
           kubelet:
             serviceMonitor:
               namespace: "{{ prometheus_namespace }}"
@@ -346,8 +181,7 @@
         namespace: "{{ prometheus_namespace }}"
         kubeconfig: "{{ kubeconfig_path }}"
       register: deployment_status
-      until: 
-        - deployment_status.resources is defined 
+      until:
         - deployment_status.resources | length > 0
         - deployment_status.resources[0].status.availableReplicas is defined
         - deployment_status.resources[0].status.availableReplicas > 0
@@ -359,10 +193,9 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
-    # Get Traefik NodePort and Grafana password for user information
     - name: Get Traefik NodePort information
-      shell: >
-        kubectl --kubeconfig="{{ kubeconfig_path }}" get svc traefik -n {{ traefik_namespace }} 
+      shell: |
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get svc traefik -n {{ traefik_namespace }} \
         -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -370,8 +203,8 @@
       changed_when: false
 
     - name: Get Grafana admin password
-      shell: >
-        kubectl --kubeconfig="{{ kubeconfig_path }}" get secret -n {{ prometheus_namespace }} prometheus-grafana 
+      shell: |
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get secret -n {{ prometheus_namespace }} "{{ prometheus_release_name }}-grafana" \
         -o jsonpath="{.data.admin-password}" | base64 --decode
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -382,9 +215,9 @@
     - name: Display installation information
       debug:
         msg:
-          - "=========================================================================================="
-          - "                    Prometheus and Grafana Stack Installed                                 "
-          - "=========================================================================================="
+          - "====================================================================="
+          - " Prometheus and Grafana Stack Installed "
+          - "====================================================================="
           - ""
           - "Grafana URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
           - "Grafana username: admin"
@@ -392,7 +225,4 @@
           - ""
           - "Prometheus URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/prometheus"
           - "Alertmanager URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/alertmanager"
-          - ""
-          - "Run the enhancement playbook next to add custom dashboards and alerts:"
-          - "  ansible-playbook install_100_monitoring.yml"
-          - "=========================================================================================="
+          - "====================================================================="

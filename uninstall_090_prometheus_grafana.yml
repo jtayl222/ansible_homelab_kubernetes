@@ -1,0 +1,142 @@
+---
+- name: Uninstall Prometheus and Grafana Stack
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    prometheus_namespace: monitoring
+    prometheus_release_name: prometheus
+  tasks:
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg: "Kubeconfig file not found at {{ kubeconfig_path }}. Cannot proceed with uninstallation."
+      when: not kubeconfig_stat.stat.exists
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Check if Prometheus release exists
+      shell: |
+        helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
+      delegate_to: "{{ groups['utility'][0] }}"
+      register: existing_prometheus
+      changed_when: false
+      failed_when: false
+
+    - name: Display uninstallation message
+      debug:
+        msg: "Uninstalling Prometheus and Grafana stack..."
+      when: existing_prometheus.stdout | length > 0
+
+    - name: Uninstall Prometheus and Grafana stack
+      kubernetes.core.helm:
+        name: "{{ prometheus_release_name }}"
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        wait: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: existing_prometheus.stdout | length > 0
+      register: prometheus_uninstall
+
+    - name: Wait for resources to be removed (30s)
+      pause:
+        seconds: 30
+      when: existing_prometheus.stdout | length > 0
+
+    # Remove CRDs
+    - name: Create CRD cleanup script
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          set -e
+          KUBECONFIG="{{ kubeconfig_path }}"
+          for CRD in alertmanagerconfigs alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
+            kubectl --kubeconfig=$KUBECONFIG delete crd ${CRD}.monitoring.coreos.com --ignore-not-found
+          done
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: existing_prometheus.stdout | length > 0
+
+    - name: Run CRD cleanup script
+      command:
+        cmd: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: existing_prometheus.stdout | length > 0
+      register: crd_removal
+      changed_when: true
+      ignore_errors: true
+
+    - name: Check if namespace still exists
+      shell: |
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get namespace "{{ prometheus_namespace }}" --no-headers --ignore-not-found
+      delegate_to: "{{ groups['utility'][0] }}"
+      register: namespace_check
+      changed_when: false
+      failed_when: false
+
+    - name: Remove namespace if it still exists
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        name: "{{ prometheus_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: absent
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: namespace_check.stdout | length > 0
+
+    # Run finalizers removal in case namespace is stuck
+    - name: Create finalizer removal script
+      copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
+        mode: '0755'
+        content: |
+          #!/bin/bash
+          set -e
+          KUBECONFIG="{{ kubeconfig_path }}"
+          NAMESPACE="{{ prometheus_namespace }}"
+          
+          # Check if namespace exists and is terminating
+          if kubectl --kubeconfig=$KUBECONFIG get namespace $NAMESPACE -o json | grep '"phase": "Terminating"' > /dev/null; then
+            echo "Removing finalizers from namespace $NAMESPACE"
+            kubectl --kubeconfig=$KUBECONFIG get namespace $NAMESPACE -o json | \
+              jq '.spec.finalizers = []' | \
+              kubectl --kubeconfig=$KUBECONFIG replace --raw "/api/v1/namespaces/$NAMESPACE/finalize" -f -
+            echo "Finalizers removed from namespace $NAMESPACE"
+          fi
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: namespace_check.stdout | length > 0
+
+    - name: Run finalizer removal script
+      command:
+        cmd: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: namespace_check.stdout | length > 0
+      register: finalizer_removal
+      changed_when: true
+      ignore_errors: true
+
+    - name: Display uninstallation results
+      debug:
+        msg:
+          - "====================================================================="
+          - " Prometheus and Grafana Stack Uninstallation Results "
+          - "====================================================================="
+          - "{% if existing_prometheus.stdout | length > 0 %}Prometheus and Grafana have been uninstalled.{% else %}Prometheus and Grafana were not found to be installed.{% endif %}"
+          - "CRDs: {% if crd_removal is defined and crd_removal.rc is defined %}Removed{% else %}Not processed{% endif %}"
+          - "Namespace: {% if namespace_check.stdout | length == 0 %}Not found or removed{% else %}May still exist, check manually{% endif %}"
+          - "====================================================================="

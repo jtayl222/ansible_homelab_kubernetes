@@ -31,4 +31,11 @@
 - name: Deploy MLflow
   import_playbook: install_120_mlflow.yml
 
+- name: Deploy Argo Workflows
+  import_playbook: install_130_argo_workflows.yml
 
+- name: Deploy minio
+  import_playbook: install_140_minio.yml
+
+- name: Deploy Seldon
+  import_playbook: install_150_seldon.yml
