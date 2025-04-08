@@ -12,6 +12,8 @@
     minio_console_nodeport: 30141
     minio_access_key: "minioadmin"
     minio_secret_key: "minioadmin"
+    minio_chart_repo: "bitnami"
+    minio_chart_name: "minio"
     
   tasks:
     # 1. Check if kubeconfig exists
@@ -38,7 +40,16 @@
         msg: "MinIO namespace not found. Please install MinIO first."
       when: "'not found' in minio_ns.stdout"
 
-    # 3. Check MinIO deployment
+    # 3. Get Helm release information
+    - name: Get MinIO Helm release information
+      shell: |
+        helm --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} status minio 2>/dev/null || echo "Release not found"
+      register: minio_release
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 4. Check MinIO deployment
     - name: Check MinIO deployment status
       shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get deployment minio -o jsonpath='{.status.availableReplicas}'
@@ -47,33 +58,60 @@
       changed_when: false
       ignore_errors: true
 
-    # 4. Check services
+    # 5. Get MinIO pod information
+    - name: Get MinIO pod status
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get pods -l app.kubernetes.io/name=minio -o wide
+      register: minio_pods
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 6. Check services
     - name: Check MinIO API service
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio -o name 2>/dev/null || echo "not found"
-      register: minio_svc
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio -o jsonpath='{.spec.ports[0].port}'
+      register: minio_svc_port
       become: false
       changed_when: false
       ignore_errors: true
 
     - name: Check MinIO NodePort services
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio-nodeport minio-console-nodeport -o name 2>/dev/null
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc minio-nodeport minio-console-nodeport -o name 2>/dev/null || echo "not found"
       register: nodeport_svcs
       become: false
       changed_when: false
       ignore_errors: true
 
-    # 5. Check IngressRoutes
+    # 7. Check IngressRoutes
     - name: Check IngressRoutes
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get ingressroute minio-api-ingress minio-console-ingress -o name 2>/dev/null
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get ingressroute minio-api-ingress minio-console-ingress -o name 2>/dev/null || echo "not found"
       register: ingress_routes
       become: false
       changed_when: false
       ignore_errors: true
 
-    # 6. Test API access
+    # 8. Get version information
+    - name: Get MinIO image version
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get deployment minio -o jsonpath='{.spec.template.spec.containers[0].image}'
+      register: minio_image
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 9. Check PVCs
+    - name: Check MinIO PVCs
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get pvc -l app.kubernetes.io/name=minio -o name
+      register: minio_pvcs
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 10. Test API access
     - name: Test MinIO API access via NodePort
       shell: |
         curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live
@@ -82,7 +120,7 @@
       changed_when: false
       ignore_errors: true
 
-    # 7. Test Console access
+    # 11. Test Console access
     - name: Test MinIO Console access via NodePort
       shell: |
         curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/
@@ -91,7 +129,7 @@
       changed_when: false
       ignore_errors: true
       
-    # 8. Test S3 operations with mc
+    # 12. Test S3 operations with mc (if specified ports are actually available)
     - name: Install MinIO Client if needed
       shell: |
         if ! command -v /tmp/mc &> /dev/null; then
@@ -103,31 +141,57 @@
       
     - name: Test MinIO with S3 operations
       shell: |
-        /tmp/mc alias set myminio http://{{ control_plane_ip }}:{{ minio_nodeport }} {{ minio_access_key }} {{ minio_secret_key }}
+        # Configure client (with retry logic)
+        for i in {1..3}; do
+          /tmp/mc alias set myminio http://{{ control_plane_ip }}:{{ minio_nodeport }} {{ minio_access_key }} {{ minio_secret_key }} && break
+          echo "Attempt $i failed, retrying..."
+          sleep 5
+        done
+        
+        # Test bucket operations
         /tmp/mc mb --ignore-existing myminio/verify-bucket
-        echo "test data" > /tmp/test-file.txt
-        /tmp/mc cp /tmp/test-file.txt myminio/verify-bucket/
+        echo "Verification test $(date)" > /tmp/verify-test-file.txt
+        /tmp/mc cp /tmp/verify-test-file.txt myminio/verify-bucket/
         /tmp/mc ls myminio/verify-bucket/
       register: s3_test
       become: false
       changed_when: false
       ignore_errors: true
 
-    # 9. Display verification summary
+    # 13. Get logs if deployment appears unhealthy
+    - name: Get MinIO logs if deployment is unhealthy
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} logs deploy/minio --tail=50
+      register: minio_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: minio_replicas.stdout is not defined or minio_replicas.stdout == "0"
+
+    # 14. Display verification summary
     - name: Display MinIO verification summary
       debug:
         msg:
           - "==================== MINIO VERIFICATION SUMMARY ===================="
           - "Status Overview:"
+          - "- MinIO Namespace: {{ 'Found' if 'not found' not in minio_ns.stdout else 'Not found' }}"
+          - "- Helm Release: {{ 'Found' if 'Release not found' not in minio_release.stdout else 'Not found' }}"
           - "- MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)' if minio_replicas.stdout is defined and minio_replicas.stdout != '0' else 'Not running' }}"
-          - "- Services: {{ 'Available' if 'not found' not in minio_svc.stdout else 'Not found' }}"
-          - "- NodePort Services: {{ 'Available' if nodeport_svcs.rc == 0 else 'Not found' }}"
-          - "- IngressRoutes: {{ 'Available' if ingress_routes.rc == 0 else 'Not found' }}"
+          - "- MinIO Service: {{ 'Available on port ' + minio_svc_port.stdout if minio_svc_port.stdout is defined else 'Not found' }}"
+          - "- NodePort Services: {{ 'Available' if 'not found' not in nodeport_svcs.stdout else 'Not found' }}"
+          - "- IngressRoutes: {{ 'Available' if 'not found' not in ingress_routes.stdout else 'Not found' }}"
+          - "- Persistent Storage: {{ 'Found: ' + minio_pvcs.stdout if minio_pvcs.stdout != '' else 'Not found' }}"
+          - ""
+          - "Version Information:"
+          - "- MinIO Image: {{ minio_image.stdout if minio_image.stdout is defined else 'Unknown' }}"
           - ""
           - "Access Verification:"
           - "- API via NodePort: {{ 'Accessible (HTTP ' + api_access.stdout + ')' if api_access.rc == 0 else 'Not accessible' }}"
           - "- Console via NodePort: {{ 'Accessible (HTTP ' + console_access.stdout + ')' if console_access.rc == 0 else 'Not accessible' }}"
           - "- S3 Operations Test: {{ 'Successful' if s3_test.rc == 0 else 'Failed - see output below' }}"
+          - ""
+          - "Pod Status:"
+          - "{{ minio_pods.stdout if minio_pods.stdout is defined else 'No pods found' }}"
           - ""
           - "Access Information:"
           - "- MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/ or http://{{ minio_host }}/"
@@ -136,13 +200,20 @@
           - "- Password: {{ minio_secret_key }}"
           - ""
           - "Troubleshooting:"
-          - "- If API is not accessible, check pod logs: kubectl -n {{ minio_namespace }} logs deploy/minio"
+          - "- If API is not accessible, check pods and services"
           - "- If console won't load, try accessing with a different browser"
           - "- For connectivity issues, ensure NodePorts are not blocked by firewall"
+          - "- Use kubectl port-forward for direct testing if needed"
           - "=================================================================="
 
-    # 10. Display S3 test details if failed
+    # 15. Display S3 test details if failed
     - name: Display S3 test output
       debug:
         msg: "{{ s3_test.stdout_lines | default(['No output available']) }}"
       when: s3_test.rc != 0
+
+    # 16. Display MinIO logs if deployment is unhealthy
+    - name: Display MinIO logs
+      debug:
+        msg: "{{ minio_logs.stdout_lines | default(['No logs available']) }}"
+      when: minio_replicas.stdout is not defined or minio_replicas.stdout == "0"
