@@ -22,6 +22,58 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
+    - name: Handle potential Helm locks
+      block:
+        - name: Check for Helm secrets that might be locked
+          shell: |
+            HELM_SECRETS=$(kubectl --kubeconfig="{{ kubeconfig_path }}" get secrets -n {{ prometheus_namespace }} -l owner=helm -o name 2>/dev/null || echo "")
+            echo "$HELM_SECRETS"
+          delegate_to: "{{ groups['utility'][0] }}"
+          register: helm_secrets
+          become: false
+          changed_when: false
+          ignore_errors: true
+
+        - name: Display found Helm secrets
+          debug:
+            msg: "Found Helm secrets: {{ helm_secrets.stdout_lines }}"
+          when: helm_secrets.stdout | length > 0
+
+        - name: Create Helm lock cleanup script
+          copy:
+            dest: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
+            mode: '0755'
+            content: |
+              #!/bin/bash
+              set -e
+              KUBECONFIG="{{ kubeconfig_path }}"
+              NAMESPACE="{{ prometheus_namespace }}"
+              RELEASE="{{ prometheus_release_name }}"
+              
+              echo "Cleaning up Helm locks for $RELEASE in $NAMESPACE..."
+              
+              # Delete specific release secrets if they exist
+              kubectl --kubeconfig=$KUBECONFIG delete secret -n $NAMESPACE sh.helm.release.v1.$RELEASE.v1 --ignore-not-found=true
+              
+              # Find and delete all release secrets for this release
+              for secret in $(kubectl --kubeconfig=$KUBECONFIG get secrets -n $NAMESPACE -l name=$RELEASE,owner=helm -o name 2>/dev/null); do
+                echo "Deleting $secret"
+                kubectl --kubeconfig=$KUBECONFIG delete -n $NAMESPACE $secret
+              done
+              
+              echo "Helm lock cleanup completed"
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+
+        - name: Run Helm lock cleanup script
+          command:
+            cmd: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          register: helm_lock_cleanup
+          changed_when: true
+          ignore_errors: true
+
     - name: Check if Prometheus release exists
       shell: |
         helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
@@ -30,22 +82,67 @@
       changed_when: false
       failed_when: false
 
-    - name: Display uninstallation message
-      debug:
-        msg: "Uninstalling Prometheus and Grafana stack..."
+    - name: Uninstall Prometheus and Grafana stack with Helm
+      block:
+        - name: Try Helm uninstall
+          shell: |
+            helm --kubeconfig="{{ kubeconfig_path }}" uninstall {{ prometheus_release_name }} -n {{ prometheus_namespace }}
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          register: helm_uninstall
+          failed_when: false
+          
+        - name: Display uninstall results
+          debug:
+            msg: "{{ helm_uninstall.stdout_lines }}"
+            
+        - name: Force removal of resources if Helm failed
+          shell: |
+            echo "Forcing removal of all Prometheus and Grafana resources..."
+            
+            # Remove specific statefulsets first (they often block deletion)
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete statefulset -n {{ prometheus_namespace }} alertmanager-prometheus-kube-prometheus-alertmanager prometheus-prometheus-kube-prometheus-prometheus --ignore-not-found=true --timeout=30s
+            
+            # Delete ALL deployments in the namespace with specific labels
+            echo "Removing deployments..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete deployment -n {{ prometheus_namespace }} prometheus-grafana prometheus-kube-prometheus-operator prometheus-kube-state-metrics --ignore-not-found=true --force --grace-period=0
+            
+            # Delete daemonsets
+            echo "Removing daemonsets..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete daemonset -n {{ prometheus_namespace }} prometheus-prometheus-node-exporter --ignore-not-found=true --force --grace-period=0
+            
+            # Delete replicasets
+            echo "Removing replicasets..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete replicaset -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --ignore-not-found=true --force --grace-period=0
+            
+            # Delete pods with extreme prejudice
+            echo "Force removing pods..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete pods -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --ignore-not-found=true --force --grace-period=0
+            
+            # Delete services
+            echo "Removing services..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete service -n {{ prometheus_namespace }} prometheus-grafana prometheus-kube-prometheus-alertmanager prometheus-kube-prometheus-operator prometheus-kube-prometheus-prometheus prometheus-kube-state-metrics prometheus-prometheus-node-exporter --ignore-not-found=true
+            
+            # Delete configmaps - be comprehensive
+            echo "Removing configmaps..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete configmap -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --ignore-not-found=true
+            
+            # Get all prometheus configmaps and delete them
+            for CM in $(kubectl --kubeconfig="{{ kubeconfig_path }}" get configmap -n {{ prometheus_namespace }} | grep prometheus- | awk '{print $1}'); do
+              echo "Deleting configmap $CM"
+              kubectl --kubeconfig="{{ kubeconfig_path }}" delete configmap -n {{ prometheus_namespace }} "$CM" --ignore-not-found=true
+            done
+            
+            # Delete secrets
+            echo "Removing secrets..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete secret -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --ignore-not-found=true
+            kubectl --kubeconfig="{{ kubeconfig_path }}" delete secret -n {{ prometheus_namespace }} -l owner=helm --ignore-not-found=true
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          register: force_removal
+          changed_when: true
+          ignore_errors: true
       when: existing_prometheus.stdout | length > 0
-
-    - name: Uninstall Prometheus and Grafana stack
-      kubernetes.core.helm:
-        name: "{{ prometheus_release_name }}"
-        release_namespace: "{{ prometheus_namespace }}"
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: absent
-        wait: true
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      when: existing_prometheus.stdout | length > 0
-      register: prometheus_uninstall
 
     - name: Wait for resources to be removed (30s)
       pause:
@@ -129,6 +226,121 @@
       register: finalizer_removal
       changed_when: true
       ignore_errors: true
+
+    - name: Verify all resources have been removed
+      shell: |
+        echo "Checking for remaining resources..."
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get all -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All resources removed"
+        
+        echo "Checking for remaining Helm secrets..."
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get secrets -n {{ prometheus_namespace }} -l owner=helm --no-headers 2>/dev/null || echo "All Helm secrets removed"
+        
+        echo "Checking for ConfigMaps..."
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get configmap -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All ConfigMaps removed"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      register: verification_check
+      changed_when: false
+      ignore_errors: true
+
+    - name: Perform extreme cleanup if resources still remain
+      block:
+        - name: Check if resources still remain
+          shell: |
+            REMAINING=$(kubectl --kubeconfig="{{ kubeconfig_path }}" get all -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null | wc -l)
+            echo $REMAINING
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          register: remaining_count
+          changed_when: false
+          
+        - name: Execute extreme cleanup
+          shell: |
+            echo "Performing extreme cleanup - directly patching resources to remove finalizers..."
+            
+            # Get all resources with finalizers
+            ALL_RESOURCES=$(kubectl --kubeconfig="{{ kubeconfig_path }}" get all -n {{ prometheus_namespace }} -o json | jq -r '.items[] | select(.metadata.finalizers != null) | .kind + "/" + .metadata.name')
+            
+            # Patch each resource to remove finalizers
+            for RESOURCE in $ALL_RESOURCES; do
+              echo "Removing finalizers from $RESOURCE"
+              kubectl --kubeconfig="{{ kubeconfig_path }}" patch -n {{ prometheus_namespace }} $RESOURCE -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+            done
+            
+            # Force delete pods with extreme prejudice
+            echo "Force deleting remaining pods..."
+            kubectl --kubeconfig="{{ kubeconfig_path }}" get pods -n {{ prometheus_namespace }} -o name | xargs -r kubectl --kubeconfig="{{ kubeconfig_path }}" delete -n {{ prometheus_namespace }} --force --grace-period=0 || true
+            
+            # Apply nuclear option if needed - direct etcd manipulation via the API to remove stuck resources
+            echo "Force removing remaining resources via API..."
+            for TYPE in configmaps secrets services deployments statefulsets daemonsets replicasets pods; do
+              echo "Removing $TYPE..."
+              RESOURCES=$(kubectl --kubeconfig="{{ kubeconfig_path }}" get $TYPE -n {{ prometheus_namespace }} -o name | grep "prometheus")
+              for RESOURCE in $RESOURCES; do
+                kubectl --kubeconfig="{{ kubeconfig_path }}" delete $RESOURCE -n {{ prometheus_namespace }} --force --grace-period=0 || true
+              done
+            done
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
+          register: extreme_cleanup
+          changed_when: true
+          when: remaining_count.stdout | int > 0
+      when: verification_check.stdout is search("Running") or verification_check.stdout is search("ClusterIP")
+
+    - name: Extended wait for all resources to terminate (if needed)
+      pause:
+        seconds: 10
+      when: verification_check.stdout is search("Running") or verification_check.stdout is search("ClusterIP")
+
+    - name: Final verification
+      shell: |
+        echo "Final verification of namespace status:"
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get namespace {{ prometheus_namespace }} 2>/dev/null || echo "Namespace completely removed"
+        
+        echo "Checking for any remaining prometheus-labeled resources across all namespaces:"
+        kubectl --kubeconfig="{{ kubeconfig_path }}" get all --all-namespaces -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "No resources found"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      register: final_verification
+      changed_when: false
+      ignore_errors: true
+
+    - name: Clean up remaining Prometheus services in kube-system
+      shell: |
+        echo "Removing lingering Prometheus services in kube-system..."
+        
+        # Find and remove all prometheus-related services in kube-system
+        PROMETHEUS_SERVICES=$(kubectl --kubeconfig="{{ kubeconfig_path }}" -n kube-system get services | grep prometheus | awk '{print $1}')
+        
+        if [ -n "$PROMETHEUS_SERVICES" ]; then
+          echo "Found lingering services:"
+          echo "$PROMETHEUS_SERVICES"
+          echo "Deleting them..."
+          
+          for SVC in $PROMETHEUS_SERVICES; do
+            kubectl --kubeconfig="{{ kubeconfig_path }}" -n kube-system delete service "$SVC" --ignore-not-found=true
+            echo "Deleted service $SVC"
+          done
+        else
+          echo "No lingering Prometheus services found in kube-system"
+        fi
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      register: cleanup_kube_system
+      changed_when: cleanup_kube_system.stdout is search("Deleted service")
+      ignore_errors: true
+
+    - name: Show kube-system cleanup results
+      debug:
+        msg: "{{ cleanup_kube_system.stdout_lines }}"
+
+    - name: Show final status
+      debug:
+        msg: "{{ final_verification.stdout_lines }}"
+
+    - name: Show remaining resources
+      debug:
+        msg: "{{ verification_check.stdout_lines }}"
 
     - name: Display uninstallation results
       debug:

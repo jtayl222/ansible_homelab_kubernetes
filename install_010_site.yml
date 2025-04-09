@@ -55,19 +55,21 @@
   tags: ["ml", "seldon"]
 
 - name: Display deployment complete banner
-  debug:
-    msg:
-      - "*******************************************************************"
-      - "*             KUBERNETES HOMELAB DEPLOYMENT COMPLETE              *"
-      - "*******************************************************************"
-      - ""
-      - "Access your services at:"
-      - "- Kubernetes Dashboard: https://<control-plane-ip>:{{ lookup('env', 'K8S_DASHBOARD_PORT') | default('30443') }}"
-      - "- Grafana: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/grafana"
-      - "- Prometheus: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/prometheus"
-      - "- Kibana: https://<control-plane-ip>:{{ lookup('env', 'KIBANA_NODE_PORT') | default('30056') }}/kibana"
-      - "- MLflow: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/mlflow"
-      - "- MinIO Console: http://<control-plane-ip>:{{ lookup('env', 'MINIO_CONSOLE_PORT') | default('30090') }}"
-      - "- Seldon Core API: http://<control-plane-ip>:{{ lookup('env', 'SELDON_NODE_PORT') | default('30150') }}/seldon/"
-      - ""
-      - "See documentation for credentials and further instructions."
+  tasks:
+    - name: Display deployment complete banner
+      debug:
+        msg: 
+          - "*******************************************************************"
+          - "*             KUBERNETES HOMELAB DEPLOYMENT COMPLETE              *"
+          - "*******************************************************************"
+          - ""
+          - "Access your services at:"
+          - "- Kubernetes Dashboard: https://<control-plane-ip>:{{ lookup('env', 'K8S_DASHBOARD_PORT') | default('30443') }}"
+          - "- Grafana: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/grafana"
+          - "- Prometheus: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/prometheus"
+          - "- Kibana: https://<control-plane-ip>:{{ lookup('env', 'KIBANA_NODE_PORT') | default('30056') }}/kibana"
+          - "- MLflow: http://<control-plane-ip>:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/mlflow"
+          - "- MinIO Console: http://<control-plane-ip>:{{ lookup('env', 'MINIO_CONSOLE_PORT') | default('30090') }}"
+          - "- Seldon Core API: http://<control-plane-ip>:{{ lookup('env', 'SELDON_NODE_PORT') | default('30150') }}/seldon/"
+          - ""
+          - "See documentation for credentials and further instructions."

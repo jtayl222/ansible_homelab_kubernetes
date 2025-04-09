@@ -174,6 +174,74 @@
       become: false
       register: prometheus_installation
 
+    - name: Create Traefik IngressRoute for Grafana
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-ingressroute
+            namespace: "{{ prometheus_namespace }}"
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`grafana.{{ node_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: "{{ prometheus_release_name }}-grafana"
+                    port: 80
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Create HTTPS IngressRoute for Grafana
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-ingressroute-https
+            namespace: "{{ prometheus_namespace }}"
+          spec:
+            entryPoints:
+              - websecure
+            routes:
+              - match: Host(`grafana.{{ node_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: "{{ prometheus_release_name }}-grafana"
+                    port: 80
+            tls: {}
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Update Grafana configuration via Helm values
+      kubernetes.core.helm:
+        name: "{{ prometheus_release_name }}"
+        chart_ref: prometheus-community/kube-prometheus-stack
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        reuse_values: true
+        values:
+          grafana:
+            grafana.ini:
+              server:
+                domain: "grafana.{{ node_ip }}.nip.io"
+                root_url: "%(protocol)s://%(domain)s"
+                serve_from_sub_path: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Restart Grafana pods to apply configuration
+      shell: |
+        kubectl --kubeconfig="{{ kubeconfig_path }}" rollout restart deployment {{ prometheus_release_name }}-grafana -n {{ prometheus_namespace }}
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
     - name: Wait for deployments to be ready
       kubernetes.core.k8s_info:
         kind: Deployment
@@ -219,7 +287,10 @@
           - " Prometheus and Grafana Stack Installed "
           - "====================================================================="
           - ""
-          - "Grafana URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
+          - "Grafana URLs:"
+          - "  - Domain access: http://grafana.{{ node_ip }}.nip.io"
+          - "  - HTTPS access: https://grafana.{{ node_ip }}.nip.io"
+          - "  - Direct access: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
           - "Grafana username: admin"
           - "Grafana password: {{ grafana_password.stdout }}"
           - ""
