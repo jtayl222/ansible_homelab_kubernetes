@@ -1,4 +1,5 @@
 ---
+# SECTION: PREPARATION - Setup environment and folders
 - name: Install Traefik and expose the dashboard
   hosts: k3s_control_plane
   become: true
@@ -24,6 +25,7 @@
         mode: '0755'
       delegate_to: "{{ groups['utility'][0] }}"
 
+# SECTION: KUBECONFIG - Prepare kubeconfig for access
     - name: Fetch kubeconfig from k3s
       ansible.builtin.fetch:
         src: /etc/rancher/k3s/k3s.yaml
@@ -45,6 +47,7 @@
       delegate_to: "{{ groups['utility'][0] }}"
       changed_when: false
 
+# SECTION: TRAEFIK CRDS - Ensure required CRDs exist
     - name: Ensure Traefik CRDs exist
       block:
         - name: Check for Traefik CRDs
@@ -67,7 +70,8 @@
           when: "'NO_CRD' in crd_check.stdout"
           delegate_to: "{{ groups['utility'][0] }}"
 
-    - name: Create HelmChartConfig to enable dashboard
+# SECTION: TRAEFIK CONFIGURATION - Configure Traefik via HelmChartConfig
+    - name: Update HelmChartConfig to enable dashboard and add CORS
       copy:
         dest: /tmp/traefik-helm-config.yaml
         content: |
@@ -82,6 +86,12 @@
                 enabled: true
               additionalArguments:
                 - "--api.insecure=true"
+                - "--api.dashboard=true"
+                - "--accesslog=true"
+              experimental:
+                plugins:
+                  cors:
+                    enabled: true
               ports:
                 web:
                   redirectTo: ""
@@ -95,6 +105,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-helm-config.yaml
       delegate_to: "{{ groups['utility'][0] }}"
 
+# SECTION: AUTHENTICATION - Set up authentication for dashboard
     - name: Create basic auth secret
       copy:
         dest: /tmp/traefik-auth-secret.yaml
@@ -115,6 +126,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-auth-secret.yaml
       delegate_to: "{{ groups['utility'][0] }}"
 
+# SECTION: MIDDLEWARES - Create required middlewares for proper routing
     - name: Create auth middleware
       copy:
         dest: /tmp/traefik-middleware.yaml
@@ -156,15 +168,34 @@
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-strip-prefix.yaml
       delegate_to: "{{ groups['utility'][0] }}"
 
-    - name: Create dashboard IngressRoute
-      copy:
-        dest: /tmp/traefik-dashboard-route.yaml
-        content: |
+    - name: Create proxy middleware for API
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: traefik-api-proxy
+            namespace: "{{ traefik_namespace }}"
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: "http"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+# SECTION: DASHBOARD ROUTES - Create IngressRoutes for dashboard access
+    - name: Create dashboard IngressRoute (HTTP host-based)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
           metadata:
             name: traefik-dashboard
-            namespace: {{ traefik_namespace }}
+            namespace: "{{ traefik_namespace }}"
           spec:
             entryPoints:
               - web
@@ -177,22 +208,20 @@
                 middlewares:
                   - name: traefik-dashboard-auth
                   - name: strip-dashboard-prefix
+                  - name: traefik-api-proxy
       delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    - name: Apply dashboard route
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-dashboard-route.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
-
-    - name: Create direct IngressRoute
-      copy:
-        dest: /tmp/traefik-direct-dashboard-route.yaml
-        content: |
+    - name: Create direct IngressRoute (HTTP path-based)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
           metadata:
             name: traefik-dashboard-direct
-            namespace: {{ traefik_namespace }}
+            namespace: "{{ traefik_namespace }}"
           spec:
             entryPoints:
               - web
@@ -205,13 +234,37 @@
                 middlewares:
                   - name: traefik-dashboard-auth
                   - name: strip-dashboard-prefix
+                  - name: traefik-api-proxy
       delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    - name: Apply direct route
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-direct-dashboard-route.yaml
+    - name: Create HTTPS dashboard IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: traefik-dashboard-https
+            namespace: "{{ traefik_namespace }}"
+          spec:
+            entryPoints:
+              - websecure
+            routes:
+              - match: Host(`{{ dashboard_subdomain }}.{{ node_ip }}.nip.io`) && PathPrefix(`/dashboard`)
+                kind: Rule
+                services:
+                  - name: api@internal
+                    kind: TraefikService
+                middlewares:
+                  - name: traefik-dashboard-auth
+                  - name: strip-dashboard-prefix
+                  - name: traefik-api-proxy
       delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
+# SECTION: TRAEFIK RESTART - Apply changes by restarting Traefik
     - name: Restart Traefik
       block:
         - name: Rollout restart
@@ -234,6 +287,19 @@
           debug:
             msg: "Traefik deployment timed out. Current: {{ deployment_check.stdout_lines }}"
 
+    - name: Force restart Traefik pods
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ traefik_namespace }} delete pods -l app.kubernetes.io/name=traefik
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Wait for Traefik to be ready
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik -n {{ traefik_namespace }} --timeout=60s
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+# SECTION: DASHBOARD ACCESS - Create local access script
     - name: Pause for changes
       pause:
         seconds: 20
@@ -258,9 +324,101 @@
           wait $PF_PID
       delegate_to: "{{ groups['utility'][0] }}"
 
+# SECTION: VERIFICATION - Verify Traefik is working correctly
+    - name: Check Traefik configuration
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ traefik_namespace }} logs -l app.kubernetes.io/name=traefik --tail=50
+      register: traefik_logs
+      delegate_to: "{{ groups['utility'][0] }}"
+      changed_when: false
+
+    - name: Display Traefik configuration
+      debug:
+        msg: "{{ traefik_logs.stdout_lines }}"
+
+    - name: Check Traefik API access directly
+      shell: |
+        # Test API access via curl inside cluster
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ traefik_namespace }} run -i --rm --restart=Never curl-test --image=curlimages/curl:7.82.0 -- \
+          curl -s http://traefik.{{ traefik_namespace }}.svc.cluster.local:80/api/version || echo "API connection failed"
+        
+        # Test API access via port-forward
+        echo "Testing API via port-forward..."
+        kubectl --kubeconfig={{ kubeconfig_path }} port-forward -n {{ traefik_namespace }} svc/traefik 19000:80 &
+        PF_PID=$!
+        sleep 2
+        curl -s http://localhost:19000/api/version || echo "API connection failed"
+        kill $PF_PID
+      delegate_to: "{{ groups['utility'][0] }}"
+      register: api_test
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display API test results
+      debug:
+        msg: "{{ api_test.stdout_lines }}"
+
     - name: Final message
       debug:
         msg:
           - "Dashboard URL: http://{{ node_ip }}:{{ traefik_port.stdout }}/dashboard/ (admin/admin)"
           - "If you see 401, ensure you used the correct credentials from htpasswd."
           - "Or use port-forward: ./scripts/dashboard.sh"
+
+# SECTION: DEMO SERVICE - Deploy a test service to verify routing
+    - name: Deploy a test whoami service
+      copy:
+        dest: /tmp/whoami-test.yaml
+        content: |
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: whoami
+            namespace: {{ traefik_namespace }}
+          spec:
+            ports:
+            - port: 80
+              name: web
+            selector:
+              app: whoami
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: whoami
+            namespace: {{ traefik_namespace }}
+          spec:
+            replicas: 1
+            selector:
+              matchLabels:
+                app: whoami
+            template:
+              metadata:
+                labels:
+                  app: whoami
+              spec:
+                containers:
+                - name: whoami
+                  image: traefik/whoami:v1.8.0
+          ---
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: whoami
+            namespace: {{ traefik_namespace }}
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`whoami.{{ node_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: whoami
+                    port: 80
+      delegate_to: "{{ groups['utility'][0] }}"
+
+    - name: Apply whoami test
+      shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/whoami-test.yaml
+      delegate_to: "{{ groups['utility'][0] }}"
