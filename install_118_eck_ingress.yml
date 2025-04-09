@@ -52,7 +52,20 @@
             stripPrefix:
               prefixes:
                 - /elasticsearch
-                - /kibana
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Create separate middleware for Kibana (without stripping)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: kibana-middleware
+            namespace: "{{ elastic_namespace }}"
+          spec: {}  # Empty middleware, no stripping
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
@@ -108,7 +121,7 @@
                     scheme: https
                     serversTransport: insecure-transport
                 middlewares:
-                  - name: elastic-strip-prefix
+                  - name: kibana-middleware  # Change from elastic-strip-prefix to this new middleware
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
