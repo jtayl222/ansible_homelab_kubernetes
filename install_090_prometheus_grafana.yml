@@ -92,7 +92,7 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
-    - name: Create Grafana and Prometheus strip-prefix middlewares
+    - name: Create Grafana and Prometheus middlewares
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -100,15 +100,32 @@
           apiVersion: traefik.io/v1alpha1
           kind: Middleware
           metadata:
-            name: "{{ item }}-strip-prefix"
+            name: "{{ item.name }}-strip-prefix"
             namespace: monitoring
           spec:
             stripPrefix:
               prefixes: 
-                - "/{{ item }}"
+                - "/{{ item.name }}"
       loop:
-        - grafana
-        - prometheus
+        - { name: "grafana" }
+        - { name: "prometheus" }
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create monitoring headers middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: monitoring-headers
+            namespace: monitoring
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: "http"
       delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
@@ -194,7 +211,7 @@
       become: false
       register: prometheus_installation
 
-    - name: Create Traefik IngressRoute for Grafana
+    - name: Create consolidated Grafana IngressRoute
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -202,132 +219,27 @@
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
           metadata:
-            name: grafana-ingressroute
-            namespace: "{{ prometheus_namespace }}"
-          spec:
-            entryPoints:
-              - web
-            routes:
-              - match: Host(`grafana.{{ node_ip }}.nip.io`)
-                kind: Rule
-                services:
-                  - name: "{{ prometheus_release_name }}-grafana"
-                    port: 80
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: no
-
-    - name: Create HTTPS IngressRoute for Grafana
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: grafana-ingressroute-https
-            namespace: "{{ prometheus_namespace }}"
-          spec:
-            entryPoints:
-              - websecure
-            routes:
-              - match: Host(`grafana.{{ node_ip }}.nip.io`)
-                kind: Rule
-                services:
-                  - name: "{{ prometheus_release_name }}-grafana"
-                    port: 80
-            tls: {}
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: no
-
-    - name: Create Grafana host-based IngressRoute
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: grafana-host-route
+            name: grafana-consolidated
             namespace: monitoring
           spec:
             entryPoints:
               - web
             routes:
-              - match: Host(`grafana.local`) || Host(`grafana.{{ control_plane_ip }}.nip.io`)
+              - match: Host(`grafana.local`) || Host(`grafana.{{ node_ip }}.nip.io`)
                 kind: Rule
                 services:
                   - name: prometheus-grafana
                     port: 80
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: no
-
-    - name: Create Grafana path-based IngressRoute
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: grafana-path-route
-            namespace: monitoring
-          spec:
-            entryPoints:
-              - web
-            routes:
+                middlewares:
+                  - name: monitoring-headers
               - match: PathPrefix(`/grafana`)
                 kind: Rule
-                middlewares:
-                  - name: grafana-strip-prefix
                 services:
                   - name: prometheus-grafana
                     port: 80
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: no
-
-    - name: Create Prometheus host-based IngressRoute
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: prometheus-host-route
-            namespace: monitoring
-          spec:
-            entryPoints:
-              - web
-            routes:
-              - match: Host(`prometheus.local`) || Host(`prometheus.{{ control_plane_ip }}.nip.io`)
-                kind: Rule
-                services:
-                  - name: prometheus-kube-prometheus-prometheus
-                    port: 9090
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: no
-
-    - name: Create Prometheus path-based IngressRoute
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: prometheus-path-route
-            namespace: monitoring
-          spec:
-            entryPoints:
-              - web
-            routes:
-              - match: PathPrefix(`/prometheus`)
-                kind: Rule
                 middlewares:
-                  - name: prometheus-strip-prefix
-                services:
-                  - name: prometheus-kube-prometheus-prometheus
-                    port: 9090
+                  - name: grafana-strip-prefix
+                  - name: monitoring-headers
       delegate_to: "{{ groups['utility'][0] }}"
       become: no
 
@@ -344,7 +256,11 @@
               server:
                 domain: "grafana.{{ node_ip }}.nip.io"
                 root_url: "%(protocol)s://%(domain)s"
-                serve_from_sub_path: false
+                serve_from_sub_path: true
+          alertmanager:
+            config:
+              route:
+                receiver: 'null'
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
