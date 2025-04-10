@@ -53,8 +53,27 @@
           kind: Namespace
           metadata:
             name: "{{ minio_namespace }}"
-      become: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
       when: "'not found' in minio_ns_check.stdout"
+
+    # Add this task after the namespace is created but before creating IngressRoutes
+    - name: Create MinIO strip-prefix middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: minio-strip-prefix
+            namespace: minio
+          spec:
+            stripPrefix:
+              prefixes: 
+                - "/minio"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # 4. Add Bitnami Helm repository
     - name: Add Bitnami Helm repository
@@ -123,7 +142,8 @@
             selector:
               app.kubernetes.io/name: minio
               app.kubernetes.io/instance: minio
-      become: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # 7. Create NodePort service for MinIO Console
     - name: Create NodePort service for MinIO Console
@@ -147,7 +167,8 @@
             selector:
               app.kubernetes.io/name: minio
               app.kubernetes.io/instance: minio
-      become: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # 8. Create Traefik IngressRoute for MinIO API
     - name: Create Traefik IngressRoute for MinIO API
@@ -170,7 +191,8 @@
                 services:
                   - name: minio
                     port: 9000
-      become: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # 9. Create Traefik IngressRoute for MinIO Console
     - name: Create Traefik IngressRoute for MinIO Console
@@ -193,7 +215,31 @@
                 services:
                   - name: minio
                     port: 9001
-      become: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    # Update MinIO routing with proper console service and port
+    - name: Create MinIO Console route
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: minio-console-route
+            namespace: minio
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`minio.local`) || Host(`minio.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: minio
+                    port: 9001
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # 10. Wait for MinIO to be ready
     - name: Wait for MinIO deployment to be ready

@@ -2,7 +2,7 @@
 
 KUBECONFIG="/home/user/ansible_homelab_kubernetes/fetched_tokens/k3s-kubeconfig"
 NODE_IP="192.168.1.85"
-TRAEFIK_PORT="32441"
+TRAEFIK_PORT="30890"
 GRAFANA_PASSWORD="prom-operator"
 
 echo "========== Kubernetes Monitoring Stack =========="

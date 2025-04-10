@@ -290,6 +290,23 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
+    - name: Create Kibana strip-prefix middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: kibana-strip-prefix
+            namespace: elastic
+          spec:
+            stripPrefix:
+              prefixes: 
+                - "/kibana"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
     - name: Create Kibana deployment
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"

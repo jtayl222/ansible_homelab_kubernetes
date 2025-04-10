@@ -28,12 +28,16 @@
       become: no
 
     # Fetch kubeconfig from control plane to utility node
-    - name: Fetch kubeconfig from k3s control plane
-      fetch:
-        src: "{{ remote_kubeconfig }}"
+    - name: Fetch kubeconfig from k3s control plane using sudo
+      shell: "sudo cat /etc/rancher/k3s/k3s.yaml > /tmp/k3s.yaml && cat /tmp/k3s.yaml && rm /tmp/k3s.yaml"
+      register: kubeconfig_content
+
+    - name: Write kubeconfig to local file
+      copy:
+        content: "{{ kubeconfig_content.stdout }}"
         dest: "{{ local_kubeconfig }}"
-        flat: yes
-      become: yes
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     # Update the kubeconfig to use the control plane IP rather than localhost
     - name: Update kubeconfig to use control plane IP
@@ -50,6 +54,7 @@
         name: k8s_dashboard
       vars:
         kubeconfig: "{{ local_kubeconfig }}"
+        utility_host: "{{ groups['utility'][0] }}"
       when: dashboard_enabled
 
     # Create service account and permissions
@@ -128,6 +133,7 @@
           - "Kubernetes Dashboard has been deployed via Helm"
           - "You can access the dashboard with this token:"
           - "{{ dashboard_token.stdout }}"
+      delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create dashboard access script
       copy:
@@ -159,5 +165,48 @@
           
           # Wait for port-forward process to end (when user presses Ctrl+C)
           wait $PF_PID
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    # Add host-based routing for k8s dashboard
+    - name: Create Kubernetes Dashboard IngressRoute with host-based routing
+      kubernetes.core.k8s:
+        kubeconfig: "{{ local_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: dashboard-headers
+            namespace: kubernetes-dashboard
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: "https"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create Kubernetes Dashboard IngressRoute with host-based routing
+      kubernetes.core.k8s:
+        kubeconfig: "{{ local_kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kubernetes-dashboard-host-route
+            namespace: kubernetes-dashboard
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`dashboard.local`) || Host(`dashboard.{{ node_ip }}.nip.io`)
+                kind: Rule
+                middlewares:
+                  - name: dashboard-headers
+                services:
+                  - name: kubernetes-dashboard-kong-proxy
+                    port: 443
+                    scheme: https
       delegate_to: "{{ groups['utility'][0] }}"
       become: no

@@ -92,6 +92,26 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
+    - name: Create Grafana and Prometheus strip-prefix middlewares
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: "{{ item }}-strip-prefix"
+            namespace: monitoring
+          spec:
+            stripPrefix:
+              prefixes: 
+                - "/{{ item }}"
+      loop:
+        - grafana
+        - prometheus
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
     - name: Create CRD installation script
       copy:
         dest: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
@@ -194,7 +214,7 @@
                   - name: "{{ prometheus_release_name }}-grafana"
                     port: 80
       delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+      become: no
 
     - name: Create HTTPS IngressRoute for Grafana
       kubernetes.core.k8s:
@@ -217,7 +237,99 @@
                     port: 80
             tls: {}
       delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+      become: no
+
+    - name: Create Grafana host-based IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-host-route
+            namespace: monitoring
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`grafana.local`) || Host(`grafana.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: prometheus-grafana
+                    port: 80
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create Grafana path-based IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: grafana-path-route
+            namespace: monitoring
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/grafana`)
+                kind: Rule
+                middlewares:
+                  - name: grafana-strip-prefix
+                services:
+                  - name: prometheus-grafana
+                    port: 80
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create Prometheus host-based IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: prometheus-host-route
+            namespace: monitoring
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`prometheus.local`) || Host(`prometheus.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: prometheus-kube-prometheus-prometheus
+                    port: 9090
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create Prometheus path-based IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: prometheus-path-route
+            namespace: monitoring
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/prometheus`)
+                kind: Rule
+                middlewares:
+                  - name: prometheus-strip-prefix
+                services:
+                  - name: prometheus-kube-prometheus-prometheus
+                    port: 9090
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     - name: Update Grafana configuration via Helm values
       kubernetes.core.helm:

@@ -241,6 +241,52 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
+    # Add both HTTP and HTTPS routes for Kibana
+    - name: Create Kibana host-based IngressRoute (HTTP)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kibana-host-route
+            namespace: elastic
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`kibana.local`) || Host(`kibana.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: kibana
+                    port: 5601
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
+    - name: Create Kibana host-based IngressRoute (HTTPS)
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kibana-host-route-https
+            namespace: elastic
+          spec:
+            entryPoints:
+              - websecure
+            routes:
+              - match: Host(`kibana.local`) || Host(`kibana.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: kibana
+                    port: 5601
+            tls: {}
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
     # Check resulting configuration
     - name: Get all IngressRoutes
       shell: |

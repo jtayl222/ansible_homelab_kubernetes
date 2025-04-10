@@ -72,6 +72,24 @@
       become: false
       when: "'not found' in mlflow_ns_check.stdout"
 
+    # Add this task after the namespace is created but before creating IngressRoutes
+    - name: Create MLflow strip-prefix middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: mlflow-strip-prefix
+            namespace: mlflow
+          spec:
+            stripPrefix:
+              prefixes: 
+                - "/mlflow"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
+
     # Create PVC for MLflow artifacts
     - name: Create PVC for MLflow artifacts
       kubernetes.core.k8s:
@@ -256,12 +274,13 @@
           kind: Middleware
           metadata:
             name: mlflow-strip-prefix
-            namespace: "{{ mlflow_namespace }}"
+            namespace: mlflow
           spec:
             stripPrefix:
-              prefixes:
-                - /mlflow
-      become: false
+              prefixes: 
+                - "/mlflow"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: no
 
     - name: Create headers middleware
       kubernetes.core.k8s:
@@ -310,6 +329,47 @@
             tls: {}
       become: false
       when: enable_tls
+
+    # Update MLflow routing configuration
+    - name: Create MLflow routing configuration
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: mlflow-route
+            namespace: mlflow
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`mlflow.local`) || Host(`mlflow.{{ control_plane_ip }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: mlflow
+                    port: 5000
+
+    - name: Create MLflow path-based route
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: mlflow-path-route
+            namespace: mlflow
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/mlflow`)
+                kind: Rule
+                middlewares:
+                  - name: mlflow-strip-prefix
+                services:
+                  - name: mlflow
+                    port: 5000
 
     # Generate TLS certificates for secure access if enabled
     - name: Create directory for certificates
