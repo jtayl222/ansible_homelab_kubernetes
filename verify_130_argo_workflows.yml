@@ -111,7 +111,7 @@
     # 8. Check if Argo UI is accessible via NodePort
     - name: Test Argo UI via NodePort
       shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
+        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
       register: nodeport_access
       become: false
       changed_when: false
@@ -120,7 +120,7 @@
     # 9. Test Argo UI via Ingress
     - name: Test Argo UI via Ingress
       shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ argo_host }}/
+        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ argo_host }}/
       register: ingress_access
       become: false
       changed_when: false
@@ -248,7 +248,7 @@
           - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing' }}"
           - ""
           - "Access Verification:"
-          - "- NodePort Service: {{ 'Available' if nodeport_check.rc == 0 else 'Not found' }}"
+          - "- NodePort Service: {{ 'Available' if nodeport_services is defined and nodeport_services.stdout | length > 0 else 'Not found' }}"
           - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout else 'Not found' }}"
           - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.stdout + ')' if nodeport_access.rc == 0 else 'Not accessible' }}"
           - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.stdout + ')' if ingress_access.rc == 0 else 'Not accessible' }}"
@@ -368,7 +368,7 @@
 
     - name: Test access again after fix
       shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
+        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
       register: nodeport_access_after_fix
       become: false
       changed_when: false

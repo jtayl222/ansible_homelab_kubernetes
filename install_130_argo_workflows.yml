@@ -70,29 +70,7 @@
             storageClassName: nfs-client
       become: false
 
-    # 5. Install Argo Workflows from official manifests
-    - name: Install Argo Workflows manifests
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f https://github.com/argoproj/argo-workflows/releases/download/{{ argo_version }}/install.yaml
-      register: install_result
-      become: false
-      changed_when: "'created' in install_result.stdout or 'configured' in install_result.stdout"
-      
-    - name: Display installation results
-      debug:
-        msg: "{{ install_result.stdout_lines }}"
-      when: install_result.stdout | length > 0
-
-    # 6. Check available env vars and arguments for argo-server
-    - name: Get argo-server deployment info
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o yaml
-      register: argo_server_info
-      become: false
-      changed_when: false
-      ignore_errors: true
-
-    # 7. Configure controller with default artifact repository
+    # 5. Create ConfigMap for artifact repository configuration
     - name: Create ConfigMap for artifact repository configuration
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -118,220 +96,50 @@
                   key: secretkey
       become: false
 
-    # 8. Create NodePort service for direct access
-    - name: Create NodePort service for Argo UI
+    # 6. Create workflow controller ConfigMap
+    - name: Create workflow controller ConfigMap
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
-          kind: Service
+          kind: ConfigMap
           metadata:
-            name: argo-server-nodeport
+            name: workflow-controller-configmap
             namespace: "{{ argo_namespace }}"
-          spec:
-            type: NodePort
-            ports:
-            - port: 2746
-              targetPort: 2746
-              nodePort: "{{ argo_nodeport }}"
-              protocol: TCP
-              name: https  # This is correct for HTTPS
-            selector:
-              app: argo-server
+          data:
+            config: |
+              executor:
+                resources:
+                  requests:
+                    cpu: 100m
+                    memory: 64Mi
+                  limits:
+                    cpu: 500m
+                    memory: 512Mi
+              workflowDefaults:
+                spec:
+                  serviceAccountName: default
+                  ttlStrategy:
+                    secondsAfterCompletion: 3600
+                    secondsAfterSuccess: 3600
+                    secondsAfterFailure: 7200
       become: false
 
-    # 9. Create Traefik IngressRoute
-    - name: Create Traefik IngressRoute for Argo UI
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: argo-workflows-ingress
-            namespace: "{{ argo_namespace }}"
-          spec:
-            entryPoints:
-              - websecure  # Changed to use websecure for HTTPS
-            routes:
-              - match: Host(`{{ argo_host }}`)
-                kind: Rule
-                services:
-                  - name: argo-server
-                    port: 2746
-                    scheme: https  # Added scheme: https
-            tls: {}  # Add basic TLS config
-      become: false
-
-    # 10. Wait for deployments to be ready - with increased timeouts
-    - name: Wait for Argo Workflows controller deployment to be ready
+    # 7. Install Argo Workflows from official manifests
+    - name: Install Argo Workflows manifests
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment workflow-controller --timeout=300s
-      register: argo_controller_rollout
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f https://github.com/argoproj/argo-workflows/releases/download/{{ argo_version }}/install.yaml
+      register: install_result
       become: false
-      changed_when: false
-      ignore_errors: true
+      changed_when: "'created' in install_result.stdout or 'configured' in install_result.stdout"
+      
+    - name: Display installation results
+      debug:
+        msg: "{{ install_result.stdout_lines }}"
+      when: install_result.stdout | length > 0
 
-    - name: Wait for Argo Workflows server deployment to be ready
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment argo-server --timeout=300s
-      register: argo_server_rollout
-      become: false
-      changed_when: false
-      ignore_errors: true
-
-    # 11. Set environment variables for Argo Server authentication mode
-    - name: Configure Argo Server to use HTTPS and server auth mode
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: argo-server
-            namespace: "{{ argo_namespace }}"
-          spec:
-            template:
-              spec:
-                containers:
-                - name: argo-server
-                  env:
-                  - name: ARGO_SERVER_AUTH_MODE
-                    value: "server"
-                  - name: BASE_HREF
-                    value: "/"
-                  # Removed ARGO_SERVER_SECURE=false since we want HTTPS
-                  args:
-                  - server
-                  # Ensure probes use HTTPS
-                  readinessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-                  livenessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-      register: patch_server_result
-      become: false
-      ignore_errors: true
-
-    # 12. Patch Argo Server to use only the server command
-    - name: Patch Argo Server to use only the server command
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type=json -p='[
-          {
-            "op": "replace", 
-            "path": "/spec/template/spec/containers/0/args", 
-            "value": [
-              "server"
-            ]
-          }
-        ]'
-      register: patch_args_result
-      become: false
-      changed_when: "'patched' in patch_args_result.stdout"
-      ignore_errors: true
-
-    # Replace the readiness probe patching task with a more comprehensive one
-    - name: Update Argo Server deployment with consistent HTTP settings
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: argo-server
-            namespace: "{{ argo_namespace }}"
-          spec:
-            template:
-              spec:
-                containers:
-                - name: argo-server
-                  env:
-                  - name: ARGO_SERVER_AUTH_MODE
-                    value: "server"
-                  - name: ARGO_SERVER_SECURE
-                    value: "false"
-                  - name: BASE_HREF
-                    value: "/"
-                  args:
-                  - server
-                  readinessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-                  livenessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-      register: update_server_result
-      become: false
-      ignore_errors: true
-
-    # Add this task after the patching tasks and before the "Wait for patched Argo Server to restart" task
-
-    # Force delete any stuck pods after patching
-    - name: Delete any stuck argo-server pods
-      shell: |
-        # Find all argo-server pods that are not in Running or Completed state
-        STUCK_PODS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o jsonpath='{range ..items[?(@.status.phase!="Running" && @.status.phase!="Succeeded")]}{.metadata.name}{" "}{end}')
-        if [ -n "$STUCK_PODS" ]; then
-          echo "Found stuck pods: $STUCK_PODS"
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete pods $STUCK_PODS --force --grace-period=0
-          echo "Deleted stuck pods"
-        else
-          echo "No stuck pods found"
-        fi
-      register: delete_pods_result
-      become: false
-      changed_when: "'Deleted stuck pods' in delete_pods_result.stdout"
-      ignore_errors: true
-
-    # Add this task immediately after the previous one
-    - name: Delete all argo-server pods to force recreation with new settings
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete pods -l app=argo-server --force --grace-period=0
-      register: delete_all_pods_result
-      become: false
-      changed_when: true
-      ignore_errors: true
-
-    # Add this task after all the patching tasks and the delete pods task
-
-    # Clean restart of argo-server deployment to consolidate changes
-    - name: Clean restart argo-server deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=0
-        sleep 5
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=1
-      register: restart_result
-      become: false
-      changed_when: true
-      ignore_errors: true
-
-    # Make sure this task runs again after all configuration changes
-    - name: Clean restart both argo-server and workflow-controller deployments
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=0
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment workflow-controller --replicas=0
-        sleep 5
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment workflow-controller --replicas=1
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=1
-      register: restart_result
-      become: false
-      changed_when: true
-      ignore_errors: true
-
-    # 13. Wait for Argo Workflows CRDs to be established
+    # 8. Wait for Argo Workflows CRDs to be established
     - name: Wait for Argo Workflows CRDs to be established
       shell: |
         for i in {1..15}; do
@@ -350,51 +158,7 @@
       changed_when: false
       ignore_errors: true
 
-    # 14. Wait after patching
-    - name: Allow time for argo-server to restart after patching
-      pause:
-        seconds: 30
-      when: "patch_server_result.rc is defined and patch_server_result.rc == 0 or patch_args_result.rc is defined and patch_args_result.rc == 0 or update_server_result.rc is defined and update_server_result.rc == 0"
-
-    # 15. Wait for the new argo-server pods to be ready
-    - name: Wait for patched Argo Server to restart
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} rollout status deployment argo-server --timeout=300s
-      register: argo_server_restart
-      become: false
-      changed_when: false
-      ignore_errors: true
-
-    # 16. Create a basic workflow template example if CRDs are ready
-    - name: Create example workflow template using kubectl
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} apply -f - <<EOF
-        apiVersion: argoproj.io/v1alpha1
-        kind: WorkflowTemplate
-        metadata:
-          name: hello-world-template
-        spec:
-          entrypoint: main
-          templates:
-          - name: main
-            container:
-              image: alpine:3.14
-              command: [sh, -c]
-              args: ["echo 'Hello World'; sleep 5; echo 'Workflow completed'"]
-              resources:
-                limits:
-                  memory: 32Mi
-                  cpu: 100m
-        EOF
-      register: template_result
-      become: false
-      changed_when: "'created' in template_result.stdout or 'configured' in template_result.stdout"
-      ignore_errors: true
-      when: crd_check.rc == 0
-
-    # Add this task before submitting the test workflow (task #18)
-
-    # Create proper RBAC for the default service account
+    # 9. Set up RBAC for the default service account
     - name: Create RBAC for default service account
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -435,9 +199,7 @@
       become: false
       ignore_errors: true
 
-    # Add this after the RBAC tasks and before the test UI access task
-
-    # Create admin service account and token for UI access
+    # 10. Create admin service account for UI access
     - name: Create admin service account for Argo UI access
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -452,7 +214,7 @@
       become: false
       ignore_errors: true
 
-    - name: Create ClusterRole for admin access
+    - name: Create admin ClusterRole for Argo UI access
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
@@ -460,11 +222,18 @@
           apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRole
           metadata:
-            name: argo-admin-role
+            name: argo-server-admin-role
           rules:
-          - apiGroups: ["*"]
-            resources: ["*"]
-            verbs: ["*"]
+          - apiGroups:
+            - '*'
+            resources:
+            - '*'
+            verbs:
+            - '*'
+          - nonResourceURLs:
+            - '*'
+            verbs:
+            - '*'
       register: admin_role_result
       become: false
       ignore_errors: true
@@ -477,11 +246,11 @@
           apiVersion: rbac.authorization.k8s.io/v1
           kind: ClusterRoleBinding
           metadata:
-            name: argo-admin-binding
+            name: argo-server-admin-binding
           roleRef:
             apiGroup: rbac.authorization.k8s.io
             kind: ClusterRole
-            name: argo-admin-role
+            name: argo-server-admin-role
           subjects:
           - kind: ServiceAccount
             name: argo-admin
@@ -507,71 +276,371 @@
       become: false
       ignore_errors: true
 
-    - name: Wait for token to be populated
-      pause:
-        seconds: 5
+    # 11. Configure the Argo Server with correct flags and variables
+    - name: Configure Argo Server with correct flags and variables
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: argo-server
+            namespace: "{{ argo_namespace }}"
+          spec:
+            template:
+              spec:
+                containers:
+                - name: argo-server
+                  args:
+                  - server
+                  - "--auth-mode=server"
+                  - "--access-control-allow-origin=*"
+                  - "--base-href=/"
+                  readinessProbe:
+                    httpGet:
+                      path: /
+                      port: 2746
+                      scheme: HTTPS
+                  livenessProbe:
+                    httpGet:
+                      path: /
+                      port: 2746
+                      scheme: HTTPS
+      register: server_config_result
+      become: false
+      ignore_errors: true
 
-    - name: Get admin service account token
+    # 12. Create NodePort service for direct access
+    - name: Create NodePort service for Argo UI
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: argo-server-nodeport
+            namespace: "{{ argo_namespace }}"
+          spec:
+            type: NodePort
+            ports:
+            - port: 2746
+              targetPort: 2746
+              nodePort: "{{ argo_nodeport }}"
+              protocol: TCP
+              name: https
+            selector:
+              app: argo-server
+      become: false
+
+    # 13. Create Traefik IngressRoute
+    - name: Create Traefik IngressRoute for Argo UI with CORS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: argo-workflows-ingress
+            namespace: "{{ argo_namespace }}"
+            annotations:
+              traefik.ingress.kubernetes.io/custom-response-headers: "Access-Control-Allow-Origin: *||Access-Control-Allow-Methods: GET,POST,OPTIONS||Access-Control-Allow-Headers: DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+          spec:
+            entryPoints:
+              - websecure
+            routes:
+              - match: Host(`{{ argo_host }}`) || Host(`argo.local`)
+                kind: Rule
+                services:
+                  - name: argo-server
+                    port: 2746
+                    scheme: https
+                    serversTransport: insecure-transport
+            tls: {}
+      become: false
+
+    - name: Create ServersTransport for insecure TLS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: ServersTransport
+          metadata:
+            name: insecure-transport
+            namespace: "{{ argo_namespace }}"
+          spec:
+            insecureSkipVerify: true
+      become: false
+
+    - name: Create HTTP IngressRoute for Argo UI
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: argo-workflows-ingress-http
+            namespace: "{{ argo_namespace }}"
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`{{ argo_host }}`) || Host(`argo.local`)
+                kind: Rule
+                middlewares:
+                  - name: redirect-to-https
+                services:
+                  - name: argo-server
+                    port: 2746
+                    scheme: https
+                    serversTransport: insecure-transport
+      become: false
+
+    - name: Create redirect middleware for HTTPS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: redirect-to-https
+            namespace: "{{ argo_namespace }}"
+          spec:
+            redirectScheme:
+              scheme: https
+              permanent: true
+      become: false
+
+    # Add a comprehensive CORS ConfigMap
+    - name: Create ConfigMap for comprehensive CORS configuration
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argo-server-config
+            namespace: "{{ argo_namespace }}"
+          data:
+            config: |
+              corsAllowOrigins: ["*"]
+              corsAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+              corsAllowHeaders: ["Authorization", "Content-Type", "Accept"]
+      become: false
+
+    # Add this diagnostic task before the restart
+    - name: Check for Argo Server network policies
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get secret argo-admin-token -o jsonpath='{.data.token}' | base64 --decode
-      register: admin_token
+        echo "Checking for NetworkPolicies..."
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get networkpolicy -o name || echo "No NetworkPolicies found"
+        
+        echo "Checking service endpoints..."
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get endpoints argo-server
+        
+        echo "Checking if server is accessible internally..."
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} run -i --rm --restart=Never curl-test --image=curlimages/curl:7.82.0 -- \
+          curl -s -k https://argo-server:2746/ -o /dev/null -w "%{http_code}\n" || echo "Internal connection test failed"
+      register: network_diagnostics
       become: false
       changed_when: false
       ignore_errors: true
 
-    # Add these tasks right after the admin service account creation tasks
+    # 14. Clean restart with enhanced diagnostics
+    - name: Clean restart Argo components with enhanced diagnostics
+      block:
+        - name: Scale down deployments
+          shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=0
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment workflow-controller --replicas=0
+            echo "Scaled down deployments"
+          register: scale_down
+          become: false
+          
+        - name: Wait for pods to terminate
+          shell: |
+            echo "Waiting for pods to terminate..."
+            for i in {1..15}; do
+              if [ $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods | grep -v "NAME" | wc -l) -eq 0 ]; then
+                echo "All pods terminated"
+                exit 0
+              fi
+              echo "Attempt $i: Pods still terminating..."
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods
+              sleep 5
+            done
+            echo "WARNING: Not all pods terminated after timeout"
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods
+          register: termination_wait
+          become: false
+          changed_when: false
+          
+        - name: Check for remaining pods and force delete if necessary
+          shell: |
+            PODS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -o name)
+            if [ -n "$PODS" ]; then
+              echo "Force deleting remaining pods: $PODS"
+              echo "$PODS" | xargs kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete --force --grace-period=0
+              sleep 5
+            else
+              echo "No pods remaining"
+            fi
+          register: force_delete
+          become: false
+          changed_when: "'Force deleting' in force_delete.stdout"
+          
+        - name: Apply resource limits to Argo deployments
+          shell: |
+            # Patch workflow-controller with resource limits
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment workflow-controller --type='json' -p='[
+              {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {
+                "requests": {"memory": "128Mi", "cpu": "100m"},
+                "limits": {"memory": "256Mi", "cpu": "200m"}
+              }}
+            ]'
+            
+            # Patch argo-server with resource limits
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type='json' -p='[
+              {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {
+                "requests": {"memory": "128Mi", "cpu": "100m"},
+                "limits": {"memory": "256Mi", "cpu": "200m"}
+              }}
+            ]'
+            echo "Applied resource limits to deployments"
+          register: patch_resources
+          become: false
+          changed_when: true
+          ignore_errors: true
+          
+        - name: Scale up deployments one at a time
+          shell: |
+            echo "Scaling up workflow-controller first..."
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment workflow-controller --replicas=1
+            sleep 10
+            echo "Scaling up argo-server..."
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=1
+          register: scale_up
+          become: false
+      rescue:
+        - name: Display error message for restart failures
+          debug:
+            msg: "Failed to properly restart Argo components. See error messages above for details."
 
-    # Create a proper cluster role for admin access
-    - name: Create admin ClusterRole for Argo UI access
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: ClusterRole
-          metadata:
-            name: argo-server-admin-role
-          rules:
-          - apiGroups:
-            - '*'
-            resources:
-            - '*'
-            verbs:
-            - '*'
-          - nonResourceURLs:
-            - '*'
-            verbs:
-            - '*'
-      register: admin_role_result
-      become: false
-      ignore_errors: true
+    # 15. Enhanced deployment status checking with pod diagnostics
+    - name: Check deployment status with detailed diagnostics
+      block:
+        - name: Wait for workflow controller with debugging
+          shell: |
+            echo "Checking workflow-controller status..."
+            for i in {1..30}; do
+              STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+              READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.readyReplicas}')
+              
+              if [[ "$STATUS" == "True" && "$READY" == "1" ]]; then
+                echo "workflow-controller deployment is ready"
+                exit 0
+              fi
+              
+              echo "Attempt $i: workflow-controller not ready yet. Status: $STATUS, Ready: $READY"
+              echo "Pod details:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o wide
+              
+              if [ $i -eq 10 -o $i -eq 20 ]; then
+                echo "Checking pod events:"
+                POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
+                if [ -n "$POD" ]; then
+                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
+                  echo "Checking pod logs:"
+                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
+                fi
+              fi
+              
+              sleep 10
+            done
+            
+            echo "ERROR: Timed out waiting for workflow-controller deployment"
+            POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
+            if [ -n "$POD" ]; then
+              echo "Final pod status:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+            fi
+            exit 1
+          register: controller_status
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Wait for argo-server with debugging
+          shell: |
+            echo "Checking argo-server status..."
+            for i in {1..30}; do
+              STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+              READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.readyReplicas}')
+              
+              if [[ "$STATUS" == "True" && "$READY" == "1" ]]; then
+                echo "argo-server deployment is ready"
+                exit 0
+              fi
+              
+              echo "Attempt $i: argo-server not ready yet. Status: $STATUS, Ready: $READY"
+              echo "Pod details:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o wide
+              
+              if [ $i -eq 10 -o $i -eq 20 ]; then
+                echo "Checking pod events:"
+                POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
+                if [ -n "$POD" ]; then
+                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
+                  echo "Checking pod logs:"
+                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
+                fi
+              fi
+              
+              sleep 10
+            done
+            
+            echo "ERROR: Timed out waiting for argo-server deployment"
+            POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
+            if [ -n "$POD" ]; then
+              echo "Final pod status:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+            fi
+            exit 1
+          register: server_status
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Check node resources
+          shell: |
+            echo "Checking node resources..."
+            kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.capacity.cpu,MEMORY:.status.capacity.memory
+            
+            echo "Checking pods resources by node..."
+            kubectl --kubeconfig={{ kubeconfig_path }} get pods -A -o wide | grep -v "NAME"
+          register: node_resources
+          become: false
+          changed_when: false
+          ignore_errors: true
+          
+        - name: Display deployment status summary
+          debug:
+            msg:
+              - "==================== ARGO DEPLOYMENT STATUS ===================="
+              - "Workflow Controller: {{ 'READY' if controller_status.rc|default(1) == 0 else 'NOT READY' }}"
+              - "Argo Server: {{ 'READY' if server_status.rc|default(1) == 0 else 'NOT READY' }}"
+              - "See complete logs for debugging information"
+              - "=============================================================="
 
-    # Bind the role to the service account
-    - name: Create ClusterRoleBinding for admin service account
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: rbac.authorization.k8s.io/v1
-          kind: ClusterRoleBinding
-          metadata:
-            name: argo-server-admin-binding
-          roleRef:
-            apiGroup: rbac.authorization.k8s.io
-            kind: ClusterRole
-            name: argo-server-admin-role
-          subjects:
-          - kind: ServiceAccount
-            name: argo-admin
-            namespace: "{{ argo_namespace }}"
-      register: admin_binding_result
-      become: false
-      ignore_errors: true
-
-    # Add this after the token creation tasks
+    # 16. Create token generation script
     - name: Create a local script to generate a valid token for Argo UI
       copy:
-        dest: "{{ playbook_dir }}/get-argo-token.sh"
+        dest: "{{ playbook_dir }}/scripts/get-argo-token.sh"
         mode: "0755"
         content: |
           #!/bin/bash
@@ -579,7 +648,6 @@
           
           NAMESPACE="argo"
           SA_NAME="argo-admin"
-          SECRET_NAME="argo-admin-token"
           
           # Check if the service account exists
           if ! kubectl -n $NAMESPACE get serviceaccount $SA_NAME &>/dev/null; then
@@ -587,16 +655,9 @@
             exit 1
           fi
           
-          # Check if the token secret exists
-          if ! kubectl -n $NAMESPACE get secret $SECRET_NAME &>/dev/null; then
-            echo "Creating token secret for service account $SA_NAME..."
-            kubectl -n $NAMESPACE create token $SA_NAME > /tmp/argo-token.txt
-            TOKEN=$(cat /tmp/argo-token.txt)
-            rm /tmp/argo-token.txt
-          else
-            # Get and decode the token from the existing secret
-            TOKEN=$(kubectl -n $NAMESPACE get secret $SECRET_NAME -o jsonpath='{.data.token}' | base64 --decode)
-          fi
+          # Create a token using kubectl
+          echo "Creating token for service account $SA_NAME..."
+          TOKEN=$(kubectl -n $NAMESPACE create token $SA_NAME)
           
           if [ -z "$TOKEN" ]; then
             echo "Failed to generate token for service account $SA_NAME"
@@ -608,52 +669,53 @@
           echo "========================="
           echo "Copy this token and use it to log in to the Argo UI at:"
           echo "https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+          echo ""
+          echo "NOTE: This token is short-lived and will expire."
+          echo "Run this script again to generate a new token if needed."
       register: token_script
       become: false
 
-    - name: Create workflow controller ConfigMap
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        data:
-          config: |
-            executor:
-              resources:
-                requests:
-                  cpu: 100m
-                  memory: 64Mi
-                limits:
-                  cpu: 500m
-                  memory: 512Mi
-            workflowDefaults:
-              spec:
-                serviceAccountName: default
-                ttlStrategy:
-                  secondsAfterCompletion: 3600
-                  secondsAfterSuccess: 3600
-                  secondsAfterFailure: 7200
-      register: auth_configmap
-      become: false
-      ignore_errors: true
+    # 17. Get the admin token for display in summary
+    - name: Wait for token to be populated
+      pause:
+        seconds: 5
 
-    # Add after the ConfigMap task
-    - name: Restart workflow-controller deployment
+    - name: Get admin service account token
       shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} delete pods -l app=workflow-controller
-      register: restart_controller
-      become: false
-      changed_when: true
-      ignore_errors: true
-
-    # 17. Test Argo UI access via NodePort
-    - name: Test Argo UI access via NodePort
-      shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" https://{{ control_plane_ip }}:{{ argo_nodeport }}/
-      register: argo_ui_access
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} create token argo-admin
+      register: admin_token
       become: false
       changed_when: false
       ignore_errors: true
 
-    # 18. Submit a test workflow using kubectl
+    # 18. Create a basic workflow template example if CRDs are ready
+    - name: Create example workflow template using kubectl
+      shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} apply -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: WorkflowTemplate
+        metadata:
+          name: hello-world-template
+        spec:
+          entrypoint: main
+          templates:
+          - name: main
+            container:
+              image: alpine:3.14
+              command: [sh, -c]
+              args: ["echo 'Hello World'; sleep 5; echo 'Workflow completed'"]
+              resources:
+                limits:
+                  memory: 32Mi
+                  cpu: 100m
+        EOF
+      register: template_result
+      become: false
+      changed_when: "'created' in template_result.stdout or 'configured' in template_result.stdout"
+      ignore_errors: true
+      when: crd_check.rc == 0
+
+    # 19. Submit a test workflow using kubectl
     - name: Submit test workflow using kubectl
       shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} create -f - <<EOF
@@ -676,7 +738,16 @@
       ignore_errors: true
       when: crd_check.rc == 0
 
-    # 19. Display Argo Workflows installation summary
+    # 20. Test Argo UI access via NodePort
+    - name: Test Argo UI access via NodePort
+      shell: |
+        curl -k -s -o /dev/null -w "%{http_code}" https://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      register: argo_ui_access
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    # 21. Display Argo Workflows installation summary
     - name: Display Argo Workflows installation summary
       debug:
         msg:
@@ -688,15 +759,13 @@
           - "- Argo UI via Ingress: https://{{ argo_host }}/"
           - ""
           - "Authentication:"
-          - "- Admin Token: {% if admin_token is defined and admin_token.stdout is defined %}{{ admin_token.stdout }}{% else %}Token creation failed{% endif %}"
-          - "- To login: Copy this token and paste it in the Argo UI login screen"
-          - "- To get a valid token for UI login, run: ./get-argo-token.sh"
+          - "- To get a valid token for UI login, run: ./scripts/get-argo-token.sh"
           - "- Copy the generated token and paste it in the Argo UI login screen"
           - ""
           - "Components Deployed:"
           - "- Argo Server Status: {% if argo_server_rollout is defined and argo_server_rollout.rc is defined %}{{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment had issues' }}{% else %}Status unknown{% endif %}"
           - "- Argo Controller Status: {% if argo_controller_rollout is defined and argo_controller_rollout.rc is defined %}{{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment had issues' }}{% else %}Status unknown{% endif %}"
-          - "- Auth Config Applied: {% if patch_server_result is defined and patch_server_result.rc is defined %}{{ 'Yes' if patch_server_result.rc == 0 else 'No - may need manual configuration' }}{% else %}Status unknown{% endif %}"
+          - "- Auth Config Applied: {% if server_config_result is defined %}{{ 'Yes' if server_config_result.changed | default(false) else 'No - may need manual configuration' }}{% else %}Status unknown{% endif %}"
           - "- Workflow Template Example: {% if template_result is defined and template_result.rc is defined %}{{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready yet' }}{% else %}Not created{% endif %}"
           - ""
           - "Storage Configuration:"
@@ -715,56 +784,3 @@
           - ""
           - "Verify installation with: ansible-playbook -i inventory/hosts verify_130_argo_workflows.yml"
           - "=================================================================="
-
-    # Update the readiness/liveness probe to match HTTPS if needed
-    - name: Update Argo Server probes to match HTTPS
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: argo-server
-            namespace: "{{ argo_namespace }}"
-          spec:
-            template:
-              spec:
-                containers:
-                - name: argo-server
-                  readinessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-                  livenessProbe:
-                    httpGet:
-                      path: /
-                      port: 2746
-                      scheme: HTTPS
-      register: update_probes_result
-      become: false
-      ignore_errors: true
-
-    # Update the NodePort service for HTTPS
-    - name: Update NodePort service for HTTPS
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: argo-server-nodeport
-            namespace: "{{ argo_namespace }}"
-          spec:
-            type: NodePort
-            ports:
-            - port: 2746
-              targetPort: 2746
-              nodePort: "{{ argo_nodeport }}"
-              protocol: TCP
-              name: https  # Changed from http to https
-            selector:
-              app: argo-server
-      become: false
