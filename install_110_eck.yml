@@ -12,4 +12,3 @@
 - import_playbook: install_112_eck_operator.yml
 - import_playbook: install_114_eck_elasticsearch.yml
 - import_playbook: install_116_eck_kibana.yml
-- import_playbook: install_118_eck_ingress.yml

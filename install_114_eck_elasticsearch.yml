@@ -196,3 +196,72 @@
           - "--------------------------------------"
           - "Note: Elasticsearch uses a self-signed certificate."
           - "You may need to accept security warnings in your browser."
+
+    - name: Create Elasticsearch strip-prefix middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: elasticsearch-strip-prefix
+            namespace: "{{ elastic_namespace }}"
+          spec:
+            stripPrefix:
+              prefixes: 
+                - "/elasticsearch"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: elasticsearch_direct_access | default(false) | bool
+
+    - name: Create Elasticsearch IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: elasticsearch-consolidated
+            namespace: "{{ elastic_namespace }}"
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: PathPrefix(`/elasticsearch`)
+                kind: Rule
+                middlewares:
+                  - name: elasticsearch-strip-prefix
+                services:
+                  - name: elasticsearch-es-http
+                    port: 9200
+                    scheme: https
+                    serversTransport: insecure-transport
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: elasticsearch_direct_access | default(false) | bool
+
+    - name: Create direct access NodePort service for Elasticsearch
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: "elasticsearch-direct"
+            namespace: "{{ elastic_namespace }}"
+          spec:
+            type: NodePort
+            ports:
+            - port: 9200
+              targetPort: 9200
+              nodePort: 30092
+              protocol: TCP
+              name: https
+            selector:
+              common.k8s.elastic.co/type: elasticsearch
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: elasticsearch_direct_access | default(false) | bool

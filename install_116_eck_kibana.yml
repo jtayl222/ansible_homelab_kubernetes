@@ -6,6 +6,7 @@
     kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     elastic_namespace: "elastic"
     kibana_version: "8.8.1"
+    elastic_version: "8.8.1"  # Added to match kibana_version
     kibana_nodeport: 30056
 
   tasks:
@@ -306,6 +307,132 @@
                 - "/kibana"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+
+    - name: Create ServersTransport for insecure HTTPS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: ServersTransport
+          metadata:
+            name: insecure-transport
+            namespace: "{{ elastic_namespace }}"
+          spec:
+            insecureSkipVerify: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Create consolidated Kibana IngressRoute for HTTP
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kibana-consolidated-http
+            namespace: "{{ elastic_namespace }}"
+            labels:
+              app: kibana
+          spec:
+            entryPoints:
+              - web
+            routes:
+              # Host-based routing - NO path prefix stripping for direct access
+              - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.85') }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: kibana
+                    port: 5601
+                    scheme: https
+                    serversTransport: insecure-transport
+              # Path-based routing - WITH path prefix stripping
+              - match: PathPrefix(`/kibana`)
+                kind: Rule
+                middlewares:
+                  - name: kibana-strip-prefix
+                services:
+                  - name: kibana
+                    port: 5601
+                    scheme: https
+                    serversTransport: insecure-transport
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Create consolidated Kibana IngressRoute for HTTPS
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kibana-consolidated-https
+            namespace: "{{ elastic_namespace }}"
+            labels:
+              app: kibana
+          spec:
+            entryPoints:
+              - websecure
+            routes:
+              # Host-based routing - NO path prefix stripping for direct access
+              - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.85') }}.nip.io`)
+                kind: Rule
+                services:
+                  - name: kibana
+                    port: 5601
+                    scheme: https
+                    serversTransport: insecure-transport
+              # Path-based routing - WITH path prefix stripping
+              - match: PathPrefix(`/kibana`)
+                kind: Rule
+                middlewares:
+                  - name: kibana-strip-prefix
+                services:
+                  - name: kibana
+                    port: 5601
+                    scheme: https
+                    serversTransport: insecure-transport
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Check current Kibana configuration
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: kibana.k8s.elastic.co/v1
+        kind: Kibana
+        name: kibana
+        namespace: "{{ elastic_namespace }}"
+      register: kibana_config
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+
+    - name: Update Kibana with basePath configuration
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: kibana.k8s.elastic.co/v1
+          kind: Kibana
+          metadata:
+            name: kibana
+            namespace: "{{ elastic_namespace }}"
+          spec:
+            version: "{{ kibana_version }}"
+            count: 1
+            elasticsearchRef:
+              name: elasticsearch
+            config:
+              server.basePath: "/kibana"
+              server.rewriteBasePath: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: >
+        kibana_config.resources is defined and
+        kibana_config.resources | length > 0 and
+        (kibana_config.resources[0].spec.config is not defined or 
+         kibana_config.resources[0].spec.config['server.basePath'] is not defined)
 
     - name: Create Kibana deployment
       kubernetes.core.k8s:
