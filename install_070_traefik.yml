@@ -337,7 +337,7 @@
 
   - name: Create port-forward script
     copy:
-      dest: '{{ playbook_dir }}/scripts/dashboard.sh'
+      dest: '{{ playbook_dir }}/generated/dashboard.sh'
       mode: '0755'
       content: |
         #!/bin/bash
@@ -396,7 +396,7 @@
       - 'Dashboard URL: http://{{ node_ip }}:{{ traefik_port.stdout }}/dashboard/
         (admin/admin)'
       - If you see 401, ensure you used the correct credentials from htpasswd.
-      - 'Or use port-forward: ./scripts/dashboard.sh'
+      - 'Or use port-forward: ./generated/dashboard.sh'
 
 # SECTION: DEMO SERVICE - Deploy a test service to verify routing
   - name: Deploy a test whoami service

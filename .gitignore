@@ -82,4 +82,7 @@ kubeconfig
 **/*password*
 **/*credential*
 
+# Other files that should not be tracked
 */OLD/**
+**/generated/
+**/seldon-examples/

@@ -99,7 +99,7 @@
 
   - name: Create dashboard access script
     copy:
-      dest: '{{ playbook_dir }}/scripts/access_dashboard.sh'
+      dest: '{{ playbook_dir }}/generated/access_dashboard.sh'
       mode: '0755'
       content: |
         #!/bin/bash
@@ -148,5 +148,5 @@
       - 'Dashboard URL: {{ dashboard_url }}'
       - 'Access Token: {{ dashboard_token }}'
       - ''
-      - 'You can also use the access script: ./scripts/access_dashboard.sh'
+      - 'You can also use the access script: ./generated/access_dashboard.sh'
       - =======================================================

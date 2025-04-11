@@ -170,7 +170,7 @@
       - '  - Password: admin'
       - ''
       - 'Troubleshooting:'
-      - '  - To port-forward locally: ./scripts/dashboard.sh'
+      - '  - To port-forward locally: ./generated/dashboard.sh'
       - "  - If you get a 401 Unauthorized, make sure you're using the correct credentials"
       - '  - For certificate errors, try direct IP access'
       - ==================================================================

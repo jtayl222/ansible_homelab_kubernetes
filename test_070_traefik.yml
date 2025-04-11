@@ -158,7 +158,7 @@
 
   - name: Create comprehensive test script
     copy:
-      dest: '{{ playbook_dir }}/scripts/verify_traefik.sh'
+      dest: '{{ playbook_dir }}/generated/verify_traefik.sh'
       mode: '0755'
       content: |
         #!/bin/bash
@@ -246,7 +246,7 @@
         echo
 
   - name: Run verification script
-    shell: '{{ playbook_dir }}/scripts/verify_traefik.sh'
+    shell: '{{ playbook_dir }}/generated/verify_traefik.sh'
     register: verification_result
 
   - name: Display verification results
@@ -254,7 +254,7 @@
       msg: '{{ verification_result.stdout_lines }}'
   - name: Create cleanup script for test resources
     copy:
-      dest: '{{ playbook_dir }}/scripts/uninstall_traefik_test.sh'
+      dest: '{{ playbook_dir }}/generated/uninstall_traefik_test.sh'
       mode: '0755'
       content: |
         #!/bin/bash
@@ -281,5 +281,5 @@
       - 'Test application URL: http://{{ test_app_hostname }}:{{ traefik_port.stdout
         }}/'
       - ''
-      - 'To clean up test resources: ./scripts/uninstall_traefik_test.sh'
+      - 'To clean up test resources: ./generated/uninstall_traefik_test.sh'
       - =======================================================
