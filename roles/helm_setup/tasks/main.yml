@@ -1,10 +1,9 @@
----
 - name: Ensure required packages are installed
   ansible.builtin.package:
     name:
-      - curl
-      - apt-transport-https
-      - ca-certificates
+    - curl
+    - apt-transport-https
+    - ca-certificates
     state: present
   when: ansible_os_family == "Debian"
 

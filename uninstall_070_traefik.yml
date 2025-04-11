@@ -1,219 +1,233 @@
----
 # SECTION: PREPARATION - Verify environment and kubeconfig
 - name: Clean up Traefik Custom Configuration
   hosts: utility
   become: false
   gather_facts: false
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
     traefik_namespace: kube-system
-    
+
   tasks:
-    - name: Ensure kubeconfig exists
-      stat:
-        path: "{{ kubeconfig_path }}"
-      register: kubeconfig_stat
-      
-    - name: Fail if kubeconfig doesn't exist
-      fail:
-        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with cleanup."
-      when: not kubeconfig_stat.stat.exists
-      
-    - name: Check if Traefik deployment exists
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o name || echo "not found"
-      register: traefik_deployment
-      changed_when: false
-      
-    - name: Skip cleanup if Traefik is not deployed
-      meta: end_play
-      when: traefik_deployment.stdout == "not found"
-      
-    - name: Remove Traefik HelmChartConfig
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete helmchartconfig traefik -n {{ traefik_namespace }} --ignore-not-found
-      register: helm_chart_config_deleted
-      changed_when: helm_chart_config_deleted.rc == 0
-      ignore_errors: true
+  - name: Ensure kubeconfig exists
+    stat:
+      path: '{{ kubeconfig_path }}'
+    register: kubeconfig_stat
+
+  - name: Fail if kubeconfig doesn't exist
+    fail:
+      msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with cleanup.
+    when: not kubeconfig_stat.stat.exists
+
+  - name: Check if Traefik deployment exists
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace
+      }} -o name || echo "not found"
+    register: traefik_deployment
+    changed_when: false
+
+  - name: Skip cleanup if Traefik is not deployed
+    meta: end_play
+    when: traefik_deployment.stdout == "not found"
+
+  - name: Remove Traefik HelmChartConfig
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete helmchartconfig traefik -n
+      {{ traefik_namespace }} --ignore-not-found
+    register: helm_chart_config_deleted
+    changed_when: helm_chart_config_deleted.rc == 0
+    ignore_errors: true
 
 # SECTION: DASHBOARD ROUTES - Remove all IngressRoutes (mirrors dashboard routes section in install)
-    - name: Remove Traefik dashboard IngressRoute
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete ingressroute traefik-dashboard -n {{ traefik_namespace }} --ignore-not-found
-      register: dashboard_ingressroute_deleted
-      changed_when: dashboard_ingressroute_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove Traefik dashboard IngressRoute
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete ingressroute traefik-dashboard
+      -n {{ traefik_namespace }} --ignore-not-found
+    register: dashboard_ingressroute_deleted
+    changed_when: dashboard_ingressroute_deleted.rc == 0
+    ignore_errors: true
 
-    - name: Remove all IngressRoutes
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete ingressroute traefik-dashboard traefik-dashboard-direct traefik-dashboard-https -n {{ traefik_namespace }} --ignore-not-found
-      register: routes_deleted
-      changed_when: routes_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove all IngressRoutes
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete ingressroute traefik-dashboard
+      traefik-dashboard-direct traefik-dashboard-https -n {{ traefik_namespace }}
+      --ignore-not-found
+    register: routes_deleted
+    changed_when: routes_deleted.rc == 0
+    ignore_errors: true
 
 # SECTION: AUTHENTICATION - Remove auth components (mirrors authentication section in install)
-    - name: Remove Traefik dashboard auth secret
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete secret traefik-dashboard-auth -n {{ traefik_namespace }} --ignore-not-found
-      register: dashboard_auth_deleted
-      changed_when: dashboard_auth_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove Traefik dashboard auth secret
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete secret traefik-dashboard-auth
+      -n {{ traefik_namespace }} --ignore-not-found
+    register: dashboard_auth_deleted
+    changed_when: dashboard_auth_deleted.rc == 0
+    ignore_errors: true
 
 # SECTION: MIDDLEWARES - Remove all middlewares (mirrors middlewares section in install)
-    - name: Remove any Traefik middlewares
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete middleware -n {{ traefik_namespace }} \
-        add-trailing-slash strip-prefix cors-headers traefik-dashboard-auth --ignore-not-found
-      register: middlewares_deleted
-      changed_when: middlewares_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove any Traefik middlewares
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete middleware -n {{ traefik_namespace
+      }} \
+      add-trailing-slash strip-prefix cors-headers traefik-dashboard-auth --ignore-not-found
+    register: middlewares_deleted
+    changed_when: middlewares_deleted.rc == 0
+    ignore_errors: true
 
-    - name: Remove all middlewares
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete middleware -n {{ traefik_namespace }} \
-        traefik-dashboard-auth strip-dashboard-prefix traefik-api-proxy --ignore-not-found
-      register: all_middlewares_deleted
-      changed_when: all_middlewares_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove all middlewares
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete middleware -n {{ traefik_namespace
+      }} \
+      traefik-dashboard-auth strip-dashboard-prefix traefik-api-proxy --ignore-not-found
+    register: all_middlewares_deleted
+    changed_when: all_middlewares_deleted.rc == 0
+    ignore_errors: true
 
 # SECTION: DEMO SERVICE - Remove test service (mirrors demo service section in install)
-    - name: Remove test whoami service
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} delete deployment,service,ingressroute whoami -n {{ traefik_namespace }} --ignore-not-found
-      register: whoami_deleted
-      changed_when: whoami_deleted.rc == 0
-      ignore_errors: true
+  - name: Remove test whoami service
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} delete deployment,service,ingressroute
+      whoami -n {{ traefik_namespace }} --ignore-not-found
+    register: whoami_deleted
+    changed_when: whoami_deleted.rc == 0
+    ignore_errors: true
 
 # SECTION: TRAEFIK CONFIGURATION - Reset Traefik to defaults (mirrors traefik configuration in install)
-    - name: Create restore script to reset Traefik to K3s defaults
-      copy:
-        dest: /tmp/reset-traefik-config.yaml
-        content: |
-          apiVersion: helm.cattle.io/v1
-          kind: HelmChartConfig
-          metadata:
-            name: traefik
-            namespace: kube-system
-          spec:
-            valuesContent: |-
-              # Reset to k3s defaults
-              dashboard:
-                enabled: false
-              logs:
-                general:
-                  level: ERROR
-              additionalArguments: []
-      
-    - name: Apply reset configuration
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/reset-traefik-config.yaml
-      register: reset_applied
-      changed_when: reset_applied.rc == 0
-      ignore_errors: true
+  - name: Create restore script to reset Traefik to K3s defaults
+    copy:
+      dest: /tmp/reset-traefik-config.yaml
+      content: |
+        apiVersion: helm.cattle.io/v1
+        kind: HelmChartConfig
+        metadata:
+          name: traefik
+          namespace: kube-system
+        spec:
+          valuesContent: |-
+            # Reset to k3s defaults
+            dashboard:
+              enabled: false
+            logs:
+              general:
+                level: ERROR
+            additionalArguments: []
 
-    - name: Wait for Traefik config to be processed (10 seconds)
-      pause:
-        seconds: 10
-      when: reset_applied.rc == 0
-      
-    - name: Restart Traefik to apply default configuration
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} rollout restart deployment traefik -n {{ traefik_namespace }}
-      register: traefik_restarted
-      changed_when: traefik_restarted.rc == 0
-      ignore_errors: true
+  - name: Apply reset configuration
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/reset-traefik-config.yaml
+    register: reset_applied
+    changed_when: reset_applied.rc == 0
+    ignore_errors: true
 
-    - name: Wait for Traefik to be ready
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik -n {{ traefik_namespace }} --timeout=60s
-      register: traefik_ready
-      changed_when: false
-      ignore_errors: true
+  - name: Wait for Traefik config to be processed (10 seconds)
+    pause:
+      seconds: 10
+    when: reset_applied.rc == 0
 
-    - name: Check for any remaining Traefik CRD resources
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute,middleware,traefikservice -A -o name || echo "No resources found"
-      register: remaining_resources
-      changed_when: false
+  - name: Restart Traefik to apply default configuration
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} rollout restart deployment traefik
+      -n {{ traefik_namespace }}
+    register: traefik_restarted
+    changed_when: traefik_restarted.rc == 0
+    ignore_errors: true
+
+  - name: Wait for Traefik to be ready
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik
+      -n {{ traefik_namespace }} --timeout=60s
+    register: traefik_ready
+    changed_when: false
+    ignore_errors: true
+
+  - name: Check for any remaining Traefik CRD resources
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute,middleware,traefikservice
+      -A -o name || echo "No resources found"
+    register: remaining_resources
+    changed_when: false
 
 # SECTION: DASHBOARD ACCESS - Remove dashboard script (mirrors dashboard access in install)
-    - name: Remove port-forward script
-      file:
-        path: "{{ playbook_dir }}/scripts/dashboard.sh"
-        state: absent
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Remove port-forward script
+    file:
+      path: '{{ playbook_dir }}/scripts/dashboard.sh'
+      state: absent
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
 # SECTION: CLEANUP - Remove temporary files and scripts
-    - name: Remove cleanup scripts
-      file:
-        path: "{{ playbook_dir }}/scripts/{{ item }}"
-        state: absent
-      loop:
-        - "test_traefik.sh"
-        - "traefik-portforward.sh"
-      ignore_errors: true
-      
-    - name: Remove config files
-      file:
-        path: "{{ playbook_dir }}/fetched_tokens/{{ item }}"
-        state: absent
-      loop:
-        - "traefik-config.yaml"
-        - "traefik-dashboard.yaml"
-        - "traefik-dashboard-alt.yaml"
-        - "traefik-middlewares.yaml"
-      ignore_errors: true
+  - name: Remove cleanup scripts
+    file:
+      path: '{{ playbook_dir }}/scripts/{{ item }}'
+      state: absent
+    loop:
+    - test_traefik.sh
+    - traefik-portforward.sh
+    ignore_errors: true
 
-    - name: Clean up temporary files
-      file:
-        path: "{{ item }}"
-        state: absent
-      loop:
-        - "/tmp/traefik-helm-config.yaml" 
-        - "/tmp/traefik-auth-secret.yaml"
-        - "/tmp/traefik-middleware.yaml"
-        - "/tmp/traefik-strip-prefix.yaml"
-        - "/tmp/traefik-dashboard-route.yaml"
-        - "/tmp/traefik-direct-dashboard-route.yaml"
-        - "/tmp/traefik-https-dashboard-route.yaml"
-        - "/tmp/traefik-crds.yaml"
-        - "/tmp/whoami-test.yaml"
-        - "/tmp/reset-traefik-config.yaml"
-      delegate_to: "{{ groups['utility'][0] }}"
-      ignore_errors: true
+  - name: Remove config files
+    file:
+      path: '{{ playbook_dir }}/fetched_tokens/{{ item }}'
+      state: absent
+    loop:
+    - traefik-config.yaml
+    - traefik-dashboard.yaml
+    - traefik-dashboard-alt.yaml
+    - traefik-middlewares.yaml
+    ignore_errors: true
+
+  - name: Clean up temporary files
+    file:
+      path: '{{ item }}'
+      state: absent
+    loop:
+    - /tmp/traefik-helm-config.yaml
+    - /tmp/traefik-auth-secret.yaml
+    - /tmp/traefik-middleware.yaml
+    - /tmp/traefik-strip-prefix.yaml
+    - /tmp/traefik-dashboard-route.yaml
+    - /tmp/traefik-direct-dashboard-route.yaml
+    - /tmp/traefik-https-dashboard-route.yaml
+    - /tmp/traefik-crds.yaml
+    - /tmp/whoami-test.yaml
+    - /tmp/reset-traefik-config.yaml
+    delegate_to: "{{ groups['utility'][0] }}"
+    ignore_errors: true
 
 # SECTION: VERIFICATION - Verify Traefik has been reset to defaults
-    - name: Collect information about current Traefik state
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o jsonpath='{.spec.template.spec.containers[0].args}'
-      register: traefik_current_args
-      changed_when: false
-      ignore_errors: true
+  - name: Collect information about current Traefik state
+    shell: >
+      kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace
+      }} -o jsonpath='{.spec.template.spec.containers[0].args}'
+    register: traefik_current_args
+    changed_when: false
+    ignore_errors: true
 
-    - name: Display cleanup result
-      debug:
-        msg:
-          - "======================================================="
-          - "Traefik Cleanup Complete"
-          - "======================================================="
-          - "Actions taken:"
-          - "- Removed custom HelmChartConfig: {{ helm_chart_config_deleted.rc == 0 }}"
-          - "- Removed dashboard IngressRoute: {{ dashboard_ingressroute_deleted.rc == 0 }}"
-          - "- Removed auth secret: {{ dashboard_auth_deleted.rc == 0 }}"
-          - "- Removed custom middlewares: {{ middlewares_deleted.rc == 0 }}"
-          - "- Removed test whoami service: {{ whoami_deleted.rc == 0 }}"
-          - "- Removed all IngressRoutes: {{ routes_deleted.rc == 0 }}"
-          - "- Removed all middlewares: {{ all_middlewares_deleted.rc == 0 }}"
-          - "- Applied default configuration: {{ reset_applied.rc == 0 }}"
-          - "- Restarted Traefik: {{ traefik_restarted.rc == 0 }}"
-          - ""
-          - "Current Traefik configuration:"
-          - "{{ traefik_current_args.stdout | default('Unable to retrieve configuration') }}"
-          - ""
-          - "Remaining custom resources:"
-          - "{{ remaining_resources.stdout_lines | default(['None']) }}"
-          - ""
-          - "NOTE: Traefik is still running as it's a core component of k3s."
-          - "      Its configuration has been reset to k3s defaults."
-          - "======================================================="
+  - name: Display cleanup result
+    debug:
+      msg:
+      - =======================================================
+      - Traefik Cleanup Complete
+      - =======================================================
+      - 'Actions taken:'
+      - '- Removed custom HelmChartConfig: {{ helm_chart_config_deleted.rc == 0 }}'
+      - '- Removed dashboard IngressRoute: {{ dashboard_ingressroute_deleted.rc ==
+        0 }}'
+      - '- Removed auth secret: {{ dashboard_auth_deleted.rc == 0 }}'
+      - '- Removed custom middlewares: {{ middlewares_deleted.rc == 0 }}'
+      - '- Removed test whoami service: {{ whoami_deleted.rc == 0 }}'
+      - '- Removed all IngressRoutes: {{ routes_deleted.rc == 0 }}'
+      - '- Removed all middlewares: {{ all_middlewares_deleted.rc == 0 }}'
+      - '- Applied default configuration: {{ reset_applied.rc == 0 }}'
+      - '- Restarted Traefik: {{ traefik_restarted.rc == 0 }}'
+      - ''
+      - 'Current Traefik configuration:'
+      - "{{ traefik_current_args.stdout | default('Unable to retrieve configuration')
+        }}"
+      - ''
+      - 'Remaining custom resources:'
+      - "{{ remaining_resources.stdout_lines | default(['None']) }}"
+      - ''
+      - "NOTE: Traefik is still running as it's a core component of k3s."
+      - '      Its configuration has been reset to k3s defaults.'
+      - =======================================================

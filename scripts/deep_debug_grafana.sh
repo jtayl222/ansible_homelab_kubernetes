@@ -23,16 +23,16 @@ if [[ "$GRAFANA_SVC_TYPE" == "ClusterIP" ]]; then
   kubectl --kubeconfig=$KUBECONFIG port-forward -n $NAMESPACE svc/$GRAFANA_RELEASE 3000:$GRAFANA_SVC_PORT &
   PORT_FORWARD_PID=$!
   sleep 5
-  
+
   echo "   Testing direct Grafana response on localhost:3000:"
   curl -s -I http://localhost:3000 | grep -E "(^HTTP|^Location)"
-  
+
   # Kill port-forward
   kill $PORT_FORWARD_PID
   wait $PORT_FORWARD_PID 2>/dev/null
 fi
 
-echo 
+echo
 echo "2. Current Traefik and Ingress configuration:"
 echo "   Middleware definitions:"
 kubectl --kubeconfig=$KUBECONFIG get middleware -A -o wide
@@ -58,7 +58,7 @@ if [ -n "$GRAFANA_CM" ]; then
   kubectl --kubeconfig=$KUBECONFIG get cm -n $NAMESPACE $GRAFANA_CM -o yaml | grep -A20 "grafana.ini"
 fi
 
-echo 
+echo
 echo "4. Testing Traefik routing rules:"
 echo "   Testing /grafana endpoint:"
 curl -s -I -v "http://$NODE_IP:$PORT/grafana" 2>&1 | grep -E "(^> GET|^< HTTP|^< Location|Host:|^* Connected to)"
@@ -73,7 +73,7 @@ GRAFANA_POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n $NAMESPACE | grep gra
 if [ -n "$GRAFANA_POD" ]; then
   echo "   Grafana pod $GRAFANA_POD environment variables:"
   kubectl --kubeconfig=$KUBECONFIG exec -n $NAMESPACE $GRAFANA_POD -- env | grep -E "GF_SERVER|HOSTNAME|PATH"
-  
+
   echo
   echo "   Checking if grafana.ini exists in pod:"
   kubectl --kubeconfig=$KUBECONFIG exec -n $NAMESPACE $GRAFANA_POD -- ls -la /etc/grafana/

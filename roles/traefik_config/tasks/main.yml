@@ -1,7 +1,6 @@
----
 - name: Ensure directory for templates exists
   file:
-    path: "{{ playbook_dir }}/fetched_tokens"
+    path: '{{ playbook_dir }}/fetched_tokens'
     state: directory
     mode: '0700'
   delegate_to: "{{ groups['utility'][0] }}"
@@ -10,15 +9,15 @@
 - name: Fetch kubeconfig from control plane node
   fetch:
     src: /etc/rancher/k3s/k3s.yaml
-    dest: "{{ kubeconfig_path }}"
+    dest: '{{ kubeconfig_path }}'
     flat: true
   when: not kubeconfig_local is defined or not kubeconfig_local
 
 - name: Update kubeconfig with proper server address
   replace:
-    path: "{{ kubeconfig_path }}"
-    regexp: 'https://127.0.0.1:6443'
-    replace: 'https://{{ ansible_host }}:6443'
+    path: '{{ kubeconfig_path }}'
+    regexp: https://127.0.0.1:6443
+    replace: https://{{ ansible_host }}:6443
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   when: not kubeconfig_local is defined or not kubeconfig_local
@@ -37,7 +36,8 @@
 
 - name: Fail if Traefik is not installed
   fail:
-    msg: "Traefik is not installed in the cluster. Please ensure your K3s installation includes Traefik."
+    msg: Traefik is not installed in the cluster. Please ensure your K3s installation
+      includes Traefik.
   when: traefik_status.rc != 0
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
@@ -55,7 +55,7 @@
 
 - name: Parse Traefik service details
   set_fact:
-    traefik_service_json: "{{ traefik_service.stdout | from_json }}"
+    traefik_service_json: '{{ traefik_service.stdout | from_json }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
@@ -63,11 +63,11 @@
 - name: Create Traefik dashboard IngressRoute
   template:
     src: traefik-dashboard.yaml.j2
-    dest: "{{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml"
+    dest: '{{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml'
     mode: '0600'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
-  
+
 - name: Apply Traefik dashboard IngressRoute
   command: >
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml
@@ -80,11 +80,11 @@
 - name: Create Traefik common middlewares
   template:
     src: traefik-middlewares.yaml.j2
-    dest: "{{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml"
+    dest: '{{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml'
     mode: '0600'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
-  
+
 - name: Apply Traefik middlewares
   command: >
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml
@@ -97,11 +97,15 @@
 - name: Display Traefik access information
   debug:
     msg:
-      - "Traefik is running in the cluster!"
-      - "---------------------------------------------"
-      - "Traefik HTTP port: {{ traefik_service_json.spec.ports | selectattr('name', 'equalto', 'web') | map(attribute='nodePort') | first }}"
-      - "Traefik HTTPS port: {{ traefik_service_json.spec.ports | selectattr('name', 'equalto', 'websecure') | map(attribute='nodePort') | first | default('Not configured') }}"
-      - "Access Traefik dashboard at: http://{{ ansible_host }}:{{ traefik_service_json.spec.ports | selectattr('name', 'equalto', 'web') | map(attribute='nodePort') | first }}/dashboard/"
-      - "---------------------------------------------"
+    - Traefik is running in the cluster!
+    - '---------------------------------------------'
+    - "Traefik HTTP port: {{ traefik_service_json.spec.ports | selectattr('name',
+      'equalto', 'web') | map(attribute='nodePort') | first }}"
+    - "Traefik HTTPS port: {{ traefik_service_json.spec.ports | selectattr('name',
+      'equalto', 'websecure') | map(attribute='nodePort') | first | default('Not configured')
+      }}"
+    - "Access Traefik dashboard at: http://{{ ansible_host }}:{{ traefik_service_json.spec.ports
+      | selectattr('name', 'equalto', 'web') | map(attribute='nodePort') | first }}/dashboard/"
+    - '---------------------------------------------'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false

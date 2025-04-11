@@ -1,26 +1,25 @@
----
 - name: Create namespace for Elasticsearch
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: "{{ namespace }}"
+        name: '{{ namespace }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Deploy Elasticsearch
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: elasticsearch.k8s.elastic.co/v1
       kind: Elasticsearch
       metadata:
         name: elasticsearch
-        namespace: "{{ namespace }}"
+        namespace: '{{ namespace }}'
       spec:
         version: 8.8.1
         nodeSets:
@@ -47,8 +46,8 @@
               - ReadWriteOnce
               resources:
                 requests:
-                  storage: "{{ storage_size }}"
-              storageClassName: "{{ storage_class_name }}"
+                  storage: '{{ storage_size }}'
+              storageClassName: '{{ storage_class_name }}'
         http:
           tls:
             selfSignedCertificate:
@@ -58,14 +57,14 @@
 
 - name: Create NodePort service for Elasticsearch
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
       kind: Service
       metadata:
         name: elasticsearch-es-nodeport
-        namespace: "{{ namespace }}"
+        namespace: '{{ namespace }}'
       spec:
         selector:
           elasticsearch.k8s.elastic.co/cluster-name: elasticsearch
@@ -104,4 +103,4 @@
 
 - name: Display Elasticsearch health
   debug:
-    msg: "Elasticsearch health is {{ es_health.stdout | default('unknown') }}"
+    msg: Elasticsearch health is {{ es_health.stdout | default('unknown') }}

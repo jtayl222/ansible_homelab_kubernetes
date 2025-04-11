@@ -128,7 +128,7 @@ This repository includes playbooks to deploy MLflow, a platform for the machine 
 
 ### MLflow Configuration
 
-MLflow is configured with default settings that should work for most homelab environments. 
+MLflow is configured with default settings that should work for most homelab environments.
 You can customize the following variables in `group_vars/all.yml`:
 
 ```yaml

@@ -39,15 +39,15 @@ Additional variables may be found in this role’s `defaults/main.yml` and `vars
 
 1. **Include this role in a playbook** (e.g., `install_020_k3s_control_plane.yml`):
 
-    - name: Install and Configure K3s Control Plane  
-      hosts: k3s_control_plane  
-      become: true  
-      roles:  
+    - name: Install and Configure K3s Control Plane
+      hosts: k3s_control_plane
+      become: true
+      roles:
         - role: k3s_control_plane
 
 2. **Set any needed variables** in your inventory or in `group_vars/k3s_control_plane.yml`. For example:
 
-    k3s_version: "v1.24.8+k3s1"  
+    k3s_version: "v1.24.8+k3s1"
     k3s_token: "MY_SECURE_TOKEN"
 
 3. **Run your playbook** to configure the control-plane node(s):
@@ -64,7 +64,7 @@ This will install the specified (or latest stable) version of K3s, set up the co
 
 Below are recommended maintenance and patching steps for your K3s cluster, focusing on two primary update scenarios:
 
-1. **K3s patching** (monthly or critical updates).  
+1. **K3s patching** (monthly or critical updates).
 2. **Ubuntu kernel patching** (or other OS-level updates).
 
 ### K3s Patching (Monthly or Critical)
@@ -76,15 +76,15 @@ To ensure minimal downtime, patch your cluster in an orderly manner. Generally, 
 1. Cordoning and draining each node one at a time:
 
     ```bash
-    kubectl cordon <node-name>  
+    kubectl cordon <node-name>
     kubectl drain <node-name> --ignore-daemonsets --delete-local-data
-    ```  
+    ```
 
 1. Stop K3s on the worker node:
 
     ```bash
     sudo systemctl stop k3s-agent
-    ```  
+    ```
 
 1. Apply the K3s update (via Ansible or manually).
 
@@ -92,7 +92,7 @@ To ensure minimal downtime, patch your cluster in an orderly manner. Generally, 
 
     ```bash
     sudo systemctl start k3s-agent
-    ```  
+    ```
 
 1. Uncordon the node:
 
@@ -107,14 +107,14 @@ To ensure minimal downtime, patch your cluster in an orderly manner. Generally, 
 1. Cordon/drain the control-plane node if desired (this is disruptive if only one control-plane node):
 
     ```bash
-    kubectl cordon <control-plane-node-name>  
-    kubectl drain <control-plane-node-name> --ignore-daemonsets --delete-local-data  
+    kubectl cordon <control-plane-node-name>
+    kubectl drain <control-plane-node-name> --ignore-daemonsets --delete-local-data
     ```
 
 1. Stop K3s:
 
     ```bash
-    sudo systemctl stop k3s  
+    sudo systemctl stop k3s
     ```
 
 1. Update K3s.
@@ -122,13 +122,13 @@ To ensure minimal downtime, patch your cluster in an orderly manner. Generally, 
 1. Start K3s again:
 
     ```bash
-    sudo systemctl start k3s  
+    sudo systemctl start k3s
     ```
 
 1. Uncordon the node (if previously cordoned):
 
     ```bash
-    kubectl uncordon <control-plane-node-name>  
+    kubectl uncordon <control-plane-node-name>
     ```
 
 #### Validate the Cluster
@@ -145,28 +145,28 @@ When applying kernel or OS-level patches, follow a similar cordon/drain approach
 1. Cordon and drain:
 
     ```bash
-    kubectl cordon <worker-node>  
-    kubectl drain <worker-node> --ignore-daemonsets --delete-local-data  
+    kubectl cordon <worker-node>
+    kubectl drain <worker-node> --ignore-daemonsets --delete-local-data
     ```
 
 1. Stop K3s agent:
 
     ```bash
     sudo systemctl stop k3s-agent
-    ```  
+    ```
 
 1. Apply kernel/OS updates (e.g., via apt).
 
 1. Reboot if necessary, or simply start K3s:
 
     ```bash
-    sudo systemctl start k3s-agent 
-    ``` 
+    sudo systemctl start k3s-agent
+    ```
 
 1. Uncordon:
 
     ```bash
-    kubectl uncordon <worker-node>  
+    kubectl uncordon <worker-node>
     ```
 
 #### Control-Plane Node(s)
@@ -174,8 +174,8 @@ When applying kernel or OS-level patches, follow a similar cordon/drain approach
 1. Cordon and drain (if you have multiple control-plane nodes or can handle downtime on a single-node setup):
 
     ```bash
-    kubectl cordon <control-plane-node>  
-    kubectl drain <control-plane-node> --ignore-daemonsets --delete-local-data  
+    kubectl cordon <control-plane-node>
+    kubectl drain <control-plane-node> --ignore-daemonsets --delete-local-data
     ```
 
 1. Stop K3s:
@@ -190,12 +190,12 @@ When applying kernel or OS-level patches, follow a similar cordon/drain approach
 
     ```bash
     sudo systemctl start k3s
-    ```  
+    ```
 
 1. Uncordon:
 
     ```bash
-    kubectl uncordon <control-plane-node>  
+    kubectl uncordon <control-plane-node>
     ```
 
 #### Verification

@@ -1,101 +1,103 @@
----
 - name: Remove Kubernetes Dashboard
   hosts: k3s_control_plane
   become: yes
   vars:
-    kubeconfig_path: "/etc/rancher/k3s/k3s.yaml"
-    
+    kubeconfig_path: /etc/rancher/k3s/k3s.yaml
   tasks:
-    - name: Check if kubernetes-dashboard namespace exists
-      shell: kubectl get namespace kubernetes-dashboard --no-headers --ignore-not-found
-      register: dashboard_namespace
-      changed_when: false
-      failed_when: false
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
+  - name: Check if kubernetes-dashboard namespace exists
+    shell: kubectl get namespace kubernetes-dashboard --no-headers --ignore-not-found
+    register: dashboard_namespace
+    changed_when: false
+    failed_when: false
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
 
-    - name: Skip cleanup if namespace doesn't exist
-      meta: end_play
-      when: dashboard_namespace.stdout == ""
+  - name: Skip cleanup if namespace doesn't exist
+    meta: end_play
+    when: dashboard_namespace.stdout == ""
 
-    - name: Remove Kubernetes Dashboard Ingress
-      shell: kubectl delete ingress kubernetes-dashboard -n kubernetes-dashboard --ignore-not-found
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Remove Kubernetes Dashboard Ingress
+    shell: kubectl delete ingress kubernetes-dashboard -n kubernetes-dashboard --ignore-not-found
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Check if Traefik IngressRoute exists
-      shell: kubectl get ingressroute kubernetes-dashboard-route -n kubernetes-dashboard --ignore-not-found
-      register: dashboard_ingressroute
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      failed_when: false
-      changed_when: false
+  - name: Check if Traefik IngressRoute exists
+    shell: kubectl get ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
+      --ignore-not-found
+    register: dashboard_ingressroute
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    failed_when: false
+    changed_when: false
 
-    - name: Remove Traefik IngressRoute if exists
-      shell: kubectl delete ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
-      when: dashboard_ingressroute.stdout != ""
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Remove Traefik IngressRoute if exists
+    shell: kubectl delete ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
+    when: dashboard_ingressroute.stdout != ""
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Remove Traefik Middleware if exists
-      shell: kubectl delete middleware dashboard-headers -n kubernetes-dashboard --ignore-not-found
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Remove Traefik Middleware if exists
+    shell: kubectl delete middleware dashboard-headers -n kubernetes-dashboard --ignore-not-found
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Remove ClusterRoleBinding for dashboard admin
-      shell: kubectl delete clusterrolebinding dashboard-admin --ignore-not-found
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Remove ClusterRoleBinding for dashboard admin
+    shell: kubectl delete clusterrolebinding dashboard-admin --ignore-not-found
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Remove ServiceAccount for dashboard admin
-      shell: kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard --ignore-not-found
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Remove ServiceAccount for dashboard admin
+    shell: kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard --ignore-not-found
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Check if Kubernetes Dashboard is installed via Helm
-      shell: helm list -n kubernetes-dashboard -q | grep kubernetes-dashboard || echo ""
-      register: dashboard_helm_check
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      changed_when: false
-      failed_when: false
+  - name: Check if Kubernetes Dashboard is installed via Helm
+    shell: helm list -n kubernetes-dashboard -q | grep kubernetes-dashboard || echo
+      ""
+    register: dashboard_helm_check
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    changed_when: false
+    failed_when: false
 
-    - name: Uninstall Kubernetes Dashboard via Helm
-      shell: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
-      when: dashboard_helm_check.stdout != ""
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
+  - name: Uninstall Kubernetes Dashboard via Helm
+    shell: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
+    when: dashboard_helm_check.stdout != ""
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
 
-    - name: Wait for resources to be removed
-      pause:
-        seconds: 5
-      when: dashboard_helm_check.stdout != ""
+  - name: Wait for resources to be removed
+    pause:
+      seconds: 5
+    when: dashboard_helm_check.stdout != ""
 
-    - name: Delete kubernetes-dashboard namespace
-      shell: kubectl delete namespace kubernetes-dashboard --ignore-not-found
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: yes
+  - name: Delete kubernetes-dashboard namespace
+    shell: kubectl delete namespace kubernetes-dashboard --ignore-not-found
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    ignore_errors: yes
 
-    - name: Check if resources are removed
-      shell: |
-        kubectl get all -n kubernetes-dashboard 2>/dev/null || echo "Namespace removed"
-      register: check_resources
-      environment:
-        KUBECONFIG: "{{ kubeconfig_path }}"
-      failed_when: false
-      changed_when: false
+  - name: Check if resources are removed
+    shell: |
+      kubectl get all -n kubernetes-dashboard 2>/dev/null || echo "Namespace removed"
+    register: check_resources
+    environment:
+      KUBECONFIG: '{{ kubeconfig_path }}'
+    failed_when: false
+    changed_when: false
 
-    - name: Display cleanup status
-      debug:
-        msg:
-          - "======================================"
-          - "Kubernetes Dashboard Cleanup Complete"
-          - "======================================"
-          - "{{ 'All resources have been removed successfully' if 'Namespace removed' in check_resources.stdout else 'Some resources may still exist in the kubernetes-dashboard namespace' }}"
-          - "======================================"
+  - name: Display cleanup status
+    debug:
+      msg:
+      - ======================================
+      - Kubernetes Dashboard Cleanup Complete
+      - ======================================
+      - "{{ 'All resources have been removed successfully' if 'Namespace removed'
+        in check_resources.stdout else 'Some resources may still exist in the kubernetes-dashboard
+        namespace' }}"
+      - ======================================

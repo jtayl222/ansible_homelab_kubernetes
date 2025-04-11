@@ -1,16 +1,15 @@
----
 - name: Deploy properly configured Kibana
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
+    kubeconfig: '{{ kubeconfig_path }}'
     state: present
     definition:
       apiVersion: kibana.k8s.elastic.co/v1
       kind: Kibana
       metadata:
         name: kibana
-        namespace: "{{ elastic_namespace }}"
+        namespace: '{{ elastic_namespace }}'
       spec:
-        version: "8.8.1"
+        version: 8.8.1
         count: 1
         elasticsearchRef:
           name: elasticsearch
@@ -22,17 +21,17 @@
             selfSignedCertificate:
               disabled: false
         config:
-          server.publicBaseUrl: "https://{{ control_plane_ip }}/kibana"
-          server.basePath: "/kibana"
+          server.publicBaseUrl: https://{{ control_plane_ip }}/kibana
+          server.basePath: /kibana
           server.rewriteBasePath: true
-          elasticsearch.ssl.verificationMode: "none"
+          elasticsearch.ssl.verificationMode: none
         podTemplate:
           spec:
             containers:
             - name: kibana
               env:
               - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
-                value: "none"
+                value: none
               resources:
                 requests:
                   memory: 1Gi
@@ -52,7 +51,7 @@
                       echo "Port 5601 is not listening yet"
                       exit 1
                     fi
-                    
+
                     # Try to get a status from the Kibana API
                     STATUS_CODE=$(curl -k -s -o /dev/null -w "%{http_code}" "https://localhost:5601/api/status")
                     if [[ "$STATUS_CODE" == "200" ]] || [[ "$STATUS_CODE" == "503" ]]; then
@@ -79,14 +78,14 @@
 
 - name: Create NodePort service for Kibana
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig_path }}"
+    kubeconfig: '{{ kubeconfig_path }}'
     state: present
     definition:
       apiVersion: v1
       kind: Service
       metadata:
         name: kibana-kb-nodeport
-        namespace: "{{ elastic_namespace }}"
+        namespace: '{{ elastic_namespace }}'
       spec:
         selector:
           kibana.k8s.elastic.co/name: kibana
@@ -119,4 +118,4 @@
 
 - name: Display Kibana health
   debug:
-    msg: "Kibana health: {{ kibana_health.stdout }}"
+    msg: 'Kibana health: {{ kibana_health.stdout }}'

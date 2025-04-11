@@ -1,0 +1,6 @@
+# .yamlfmt.yaml
+formatter:
+  indent: 2
+  line_width: 120
+  preserve_line_breaks: true
+  include_document_start: true

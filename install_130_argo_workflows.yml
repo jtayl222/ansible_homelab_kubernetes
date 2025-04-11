@@ -465,7 +465,7 @@
         - name: Wait for pods to terminate
           shell: |
             echo "Waiting for pods to terminate..."
-            for i in {1..15}; do
+            for i in $(seq 1 15); do
               if [ $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods | grep -v "NAME" | wc -l) -eq 0 ]; then
                 echo "All pods terminated"
                 exit 0
@@ -532,115 +532,117 @@
             msg: "Failed to properly restart Argo components. See error messages above for details."
 
     # 15. Enhanced deployment status checking with pod diagnostics
-    - name: Check deployment status with detailed diagnostics
-      block:
-        - name: Wait for workflow controller with debugging
-          shell: |
-            echo "Checking workflow-controller status..."
-            for i in {1..30}; do
-              STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
-              READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.readyReplicas}')
-              
-              if [[ "$STATUS" == "True" && "$READY" == "1" ]]; then
-                echo "workflow-controller deployment is ready"
-                exit 0
-              fi
-              
-              echo "Attempt $i: workflow-controller not ready yet. Status: $STATUS, Ready: $READY"
-              echo "Pod details:"
-              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o wide
-              
-              if [ $i -eq 10 -o $i -eq 20 ]; then
-                echo "Checking pod events:"
-                POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
-                if [ -n "$POD" ]; then
-                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
-                  echo "Checking pod logs:"
-                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
-                fi
-              fi
-              
-              sleep 10
-            done
-            
-            echo "ERROR: Timed out waiting for workflow-controller deployment"
+    - name: Wait for workflow controller with debugging
+      shell: |
+        echo "Checking workflow-controller status..."
+        for i in $(seq 1 30); do
+          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.readyReplicas}')
+          
+          if [ "$STATUS" = "True" ] && [ "$READY" = "1" ]; then
+            echo "workflow-controller deployment is ready"
+            exit 0
+          fi
+          
+          echo "Attempt $i: workflow-controller not ready yet. Status: $STATUS, Ready: $READY"
+          echo "Pod details:"
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o wide
+          
+          if [ "$i" = "10" ] || [ "$i" = "20" ]; then
+            echo "Checking pod events:"
             POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
             if [ -n "$POD" ]; then
-              echo "Final pod status:"
-              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
+              echo "Checking pod logs:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
             fi
-            exit 1
-          register: controller_status
-          become: false
-          changed_when: false
-          ignore_errors: true
+          fi
           
-        - name: Wait for argo-server with debugging
-          shell: |
-            echo "Checking argo-server status..."
-            for i in {1..30}; do
-              STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
-              READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.readyReplicas}')
-              
-              if [[ "$STATUS" == "True" && "$READY" == "1" ]]; then
-                echo "argo-server deployment is ready"
-                exit 0
-              fi
-              
-              echo "Attempt $i: argo-server not ready yet. Status: $STATUS, Ready: $READY"
-              echo "Pod details:"
-              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o wide
-              
-              if [ $i -eq 10 -o $i -eq 20 ]; then
-                echo "Checking pod events:"
-                POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
-                if [ -n "$POD" ]; then
-                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
-                  echo "Checking pod logs:"
-                  kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
-                fi
-              fi
-              
-              sleep 10
-            done
-            
-            echo "ERROR: Timed out waiting for argo-server deployment"
+          sleep 10
+        done
+        
+        echo "ERROR: Timed out waiting for workflow-controller deployment"
+        POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
+        if [ -n "$POD" ]; then
+          echo "Final pod status:"
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+        fi
+        exit 1
+      args:
+        executable: /bin/bash
+      register: controller_status
+      become: false
+      changed_when: false
+      ignore_errors: true
+          
+    - name: Wait for argo-server with debugging
+      shell: |
+        echo "Checking argo-server status..."
+        for i in $(seq 1 30); do
+          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.readyReplicas}')
+          
+          if [ "$STATUS" = "True" ] && [ "$READY" = "1" ]; then
+            echo "argo-server deployment is ready"
+            exit 0
+          fi
+          
+          echo "Attempt $i: argo-server not ready yet. Status: $STATUS, Ready: $READY"
+          echo "Pod details:"
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o wide
+          
+          if [ "$i" = "10" ] || [ "$i" = "20" ]; then
+            echo "Checking pod events:"
             POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
             if [ -n "$POD" ]; then
-              echo "Final pod status:"
-              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
+              echo "Checking pod logs:"
+              kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
             fi
-            exit 1
-          register: server_status
-          become: false
-          changed_when: false
-          ignore_errors: true
+          fi
           
-        - name: Check node resources
-          shell: |
-            echo "Checking node resources..."
-            kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.capacity.cpu,MEMORY:.status.capacity.memory
-            
-            echo "Checking pods resources by node..."
-            kubectl --kubeconfig={{ kubeconfig_path }} get pods -A -o wide | grep -v "NAME"
-          register: node_resources
-          become: false
-          changed_when: false
-          ignore_errors: true
+          sleep 10
+        done
+        
+        echo "ERROR: Timed out waiting for argo-server deployment"
+        POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
+        if [ -n "$POD" ]; then
+          echo "Final pod status:"
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
+        fi
+        exit 1
+      args:
+        executable: /bin/bash
+      register: server_status
+      become: false
+      changed_when: false
+      ignore_errors: true
           
-        - name: Display deployment status summary
-          debug:
-            msg:
-              - "==================== ARGO DEPLOYMENT STATUS ===================="
-              - "Workflow Controller: {{ 'READY' if controller_status.rc|default(1) == 0 else 'NOT READY' }}"
-              - "Argo Server: {{ 'READY' if server_status.rc|default(1) == 0 else 'NOT READY' }}"
-              - "See complete logs for debugging information"
-              - "=============================================================="
+    - name: Check node resources
+      shell: |
+        echo "Checking node resources..."
+        kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.capacity.cpu,MEMORY:.status.capacity.memory
+        
+        echo "Checking pods resources by node..."
+        kubectl --kubeconfig={{ kubeconfig_path }} get pods -A -o wide | grep -v "NAME"
+      register: node_resources
+      become: false
+      changed_when: false
+      ignore_errors: true
+          
+    - name: Display deployment status summary
+      debug:
+        msg:
+          - "==================== ARGO DEPLOYMENT STATUS ===================="
+          - "Workflow Controller: {{ 'READY' if controller_status.rc|default(1) == 0 else 'NOT READY' }}"
+          - "Argo Server: {{ 'READY' if server_status.rc|default(1) == 0 else 'NOT READY' }}"
+          - "See complete logs for debugging information"
+          - "=============================================================="
 
     # 16. Create token generation script
     - name: Create a local script to generate a valid token for Argo UI
       copy:
-        dest: "{{ playbook_dir }}/scripts/get-argo-token.sh"
+        dest: "{{ playbook_dir }}/generated/get-argo-token.sh"
         mode: "0755"
         content: |
           #!/bin/bash
@@ -759,7 +761,7 @@
           - "- Argo UI via Ingress: https://{{ argo_host }}/"
           - ""
           - "Authentication:"
-          - "- To get a valid token for UI login, run: ./scripts/get-argo-token.sh"
+          - "- To get a valid token for UI login, run: ./generated/get-argo-token.sh"
           - "- Copy the generated token and paste it in the Argo UI login screen"
           - ""
           - "Components Deployed:"

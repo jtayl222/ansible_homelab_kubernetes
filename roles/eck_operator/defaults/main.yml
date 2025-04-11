@@ -1,3 +1,2 @@
----
-namespace: "elastic-system"
-version: "2.9.0"
+namespace: elastic-system
+version: 2.9.0

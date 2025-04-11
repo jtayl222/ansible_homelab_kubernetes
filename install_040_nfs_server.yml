@@ -1,115 +1,114 @@
----
 - name: Configure NFS server on utility node
   hosts: nfs_server
   become: true
   gather_facts: true
   tasks:
-    - name: Ensure required packages are installed
-      apt:
-        name:
-          - nfs-kernel-server
-          - nfs-common
-          - rpcbind
-        state: present
-        update_cache: yes
+  - name: Ensure required packages are installed
+    apt:
+      name:
+      - nfs-kernel-server
+      - nfs-common
+      - rpcbind
+      state: present
+      update_cache: yes
 
-    - name: Create NFS export directory
-      file:
-        path: "/srv/nfs/kubernetes"
-        state: directory
-        mode: '0777'
-        owner: nobody
-        group: nogroup
-        recurse: yes
+  - name: Create NFS export directory
+    file:
+      path: /srv/nfs/kubernetes
+      state: directory
+      mode: '0777'
+      owner: nobody
+      group: nogroup
+      recurse: yes
 
-    - name: Create a subdirectory for Grafana data
-      file:
-        path: "/srv/nfs/kubernetes/grafana"
-        state: directory
-        mode: '0777'
-        owner: nobody
-        group: nogroup
+  - name: Create a subdirectory for Grafana data
+    file:
+      path: /srv/nfs/kubernetes/grafana
+      state: directory
+      mode: '0777'
+      owner: nobody
+      group: nogroup
 
-    - name: Create subdirectory for Elasticsearch data
-      file:
-        path: "/srv/nfs/kubernetes/elasticsearch"
-        state: directory
-        mode: '0777'
-        owner: nobody
-        group: nogroup
+  - name: Create subdirectory for Elasticsearch data
+    file:
+      path: /srv/nfs/kubernetes/elasticsearch
+      state: directory
+      mode: '0777'
+      owner: nobody
+      group: nogroup
 
-    - name: Create subdirectory for Kibana data
-      file:
-        path: "/srv/nfs/kubernetes/kibana"
-        state: directory
-        mode: '0777'
-        owner: nobody
-        group: nogroup
+  - name: Create subdirectory for Kibana data
+    file:
+      path: /srv/nfs/kubernetes/kibana
+      state: directory
+      mode: '0777'
+      owner: nobody
+      group: nogroup
 
-    - name: Create subdirectory for MLflow data
-      file:
-        path: "/srv/nfs/kubernetes/mlflow"
-        state: directory
-        mode: '0777'
-        owner: nobody
-        group: nogroup
+  - name: Create subdirectory for MLflow data
+    file:
+      path: /srv/nfs/kubernetes/mlflow
+      state: directory
+      mode: '0777'
+      owner: nobody
+      group: nogroup
 
-    - name: Ensure exports file exists with correct content
-      copy:
-        content: '/srv/nfs/kubernetes 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)'
-        dest: /etc/exports
-        owner: root
-        group: root
-        mode: '0644'
-      register: exports_file
+  - name: Ensure exports file exists with correct content
+    copy:
+      content: /srv/nfs/kubernetes 192.168.1.0/24(rw,sync,no_subtree_check,no_root_squash)
+      dest: /etc/exports
+      owner: root
+      group: root
+      mode: '0644'
+    register: exports_file
 
-    - name: Stop NFS and RPC services for clean restart
-      systemd:
-        name: "{{ item }}"
-        state: stopped
-      loop:
-        - nfs-server
-        - rpcbind
-      ignore_errors: yes
+  - name: Stop NFS and RPC services for clean restart
+    systemd:
+      name: '{{ item }}'
+      state: stopped
+    loop:
+    - nfs-server
+    - rpcbind
+    ignore_errors: yes
 
-    - name: Reload systemd daemon
-      systemd:
-        daemon_reload: yes
+  - name: Reload systemd daemon
+    systemd:
+      daemon_reload: yes
 
-    - name: Ensure rpcbind is started first
-      systemd:
-        name: rpcbind
-        state: started
-        enabled: yes
-      register: rpcbind_started
+  - name: Ensure rpcbind is started first
+    systemd:
+      name: rpcbind
+      state: started
+      enabled: yes
+    register: rpcbind_started
 
-    - name: Apply NFS exports
-      command: exportfs -ra
-      when: exports_file.changed or rpcbind_started.changed
+  - name: Apply NFS exports
+    command: exportfs -ra
+    when: exports_file.changed or rpcbind_started.changed
 
-    - name: Ensure NFS server is started
-      systemd:
-        name: nfs-server
-        state: started
-        enabled: yes
-      register: nfs_server_started
+  - name: Ensure NFS server is started
+    systemd:
+      name: nfs-server
+      state: started
+      enabled: yes
+    register: nfs_server_started
 
     # Simple portable network verification - check if ports are listening
-    - name: Verify NFS ports are open
-      shell: ss -tuln | grep -E '(111|2049)'
-      register: nfs_ports
-      failed_when: nfs_ports.rc != 0
-      changed_when: false
+  - name: Verify NFS ports are open
+    shell: ss -tuln | grep -E '(111|2049)'
+    register: nfs_ports
+    failed_when: nfs_ports.rc != 0
+    changed_when: false
 
-    - name: Verify exports are available
-      shell: showmount -e localhost
-      register: nfs_exports
-      failed_when: nfs_exports.rc != 0
-      changed_when: false
+  - name: Verify exports are available
+    shell: showmount -e localhost
+    register: nfs_exports
+    failed_when: nfs_exports.rc != 0
+    changed_when: false
 
-    - name: Display NFS configuration status
-      debug:
-        msg:
-          - "NFS server configured successfully"
-          - "Exports: {{ nfs_exports.stdout_lines }}"
-          - "Open ports: {{ nfs_ports.stdout_lines }}"
+  - name: Display NFS configuration status
+    debug:
+      msg:
+      - NFS server configured successfully
+      - 'Exports: {{ nfs_exports.stdout_lines }}'
+      - 'Open ports: {{ nfs_ports.stdout_lines }}'

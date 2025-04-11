@@ -1,12 +1,11 @@
----
 - name: Allow k3s worker traffic (overlay network and kubelet)
   ansible.builtin.ufw:
     rule: allow
-    port: "{{ item }}"
+    port: '{{ item }}'
     proto: tcp
   loop:
-    - 10250  # Kubelet API
-    - 30000-32767  # NodePort range
+  - 10250    # Kubelet API
+  - 30000-32767    # NodePort range
 
 - name: Allow VXLAN traffic for flannel (default k3s networking)
   ansible.builtin.ufw:

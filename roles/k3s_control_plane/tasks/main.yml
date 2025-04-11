@@ -1,4 +1,3 @@
----
 - name: Install k3s on control plane
   ansible.builtin.shell: |
     curl -sfL https://get.k3s.io | sh -
@@ -19,7 +18,7 @@
 
 - name: Fail if token file is missing
   ansible.builtin.fail:
-    msg: "k3s token file not found. Installation may have failed."
+    msg: k3s token file not found. Installation may have failed.
   when: not token_file_stat.stat.exists
 
 - name: Retrieve k3s token

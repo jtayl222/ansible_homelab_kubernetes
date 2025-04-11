@@ -1,0 +1,4 @@
+traefik_version: v2.11.0
+traefik_namespace: kube-system
+traefik_dashboard_port: 9000
+traefik_node_port: 32080

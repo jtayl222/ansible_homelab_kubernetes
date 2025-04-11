@@ -1,60 +1,59 @@
----
 - name: Diagnose Kibana Issues
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    elastic_namespace: "elastic"
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    elastic_namespace: elastic
 
   tasks:
-    - name: Get Kibana pod name
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l kibana.k8s.elastic.co/name=kibana -o jsonpath='{.items[0].metadata.name}'
-      register: kibana_pod_name
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Get Kibana pod name
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l kibana.k8s.elastic.co/name=kibana -o jsonpath='{.items[0].metadata.name}'
+    register: kibana_pod_name
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Get full Kibana logs
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout }}
-      register: kibana_full_logs
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Get full Kibana logs
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout }}
+    register: kibana_full_logs
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Display Kibana logs
-      debug:
-        msg: "{{ kibana_full_logs.stdout_lines }}"
+  - name: Display Kibana logs
+    debug:
+      msg: '{{ kibana_full_logs.stdout_lines }}'
 
-    - name: Check Kibana resources
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod {{ kibana_pod_name.stdout }}
-      register: kibana_resources
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Check Kibana resources
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod {{ kibana_pod_name.stdout }}
+    register: kibana_resources
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Display Kibana resource details
-      debug:
-        msg: "{{ kibana_resources.stdout_lines }}"
+  - name: Display Kibana resource details
+    debug:
+      msg: '{{ kibana_resources.stdout_lines }}'
 
-    - name: Check Elasticsearch health
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}'
-      register: es_health
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Check Elasticsearch health
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}'
+    register: es_health
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Display Elasticsearch health
-      debug:
-        msg: "Elasticsearch health: {{ es_health.stdout }}"
+  - name: Display Elasticsearch health
+    debug:
+      msg: 'Elasticsearch health: {{ es_health.stdout }}'
 
-    - name: Test Elasticsearch access from Kibana pod
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- curl -k -s https://elasticsearch-es-http:9200 || echo "Failed to connect to Elasticsearch"
-      register: es_connection
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Test Elasticsearch access from Kibana pod
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ kibana_pod_name.stdout }} -- curl -k -s https://elasticsearch-es-http:9200 || echo "Failed to connect to Elasticsearch"
+    register: es_connection
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Display Elasticsearch connection result
-      debug:
-        msg: "{{ es_connection.stdout_lines }}"
+  - name: Display Elasticsearch connection result
+    debug:
+      msg: '{{ es_connection.stdout_lines }}'

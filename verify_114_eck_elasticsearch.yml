@@ -1,192 +1,209 @@
----
 - name: Verify Elasticsearch Deployment
   hosts: utility  # This targets all hosts in the utility group
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    elastic_namespace: "elastic"
-    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    elastic_namespace: elastic
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+      }}"
 
   tasks:
-    - name: Verify Elasticsearch CR exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o name
-      register: elasticsearch_cr_exists
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify Elasticsearch CR exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o name
+    register: elasticsearch_cr_exists
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Check Elasticsearch health
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}'
-      register: elasticsearch_health
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check Elasticsearch health
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}'
+    register: elasticsearch_health
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Verify Elasticsearch pods are running
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
-      register: elasticsearch_pods
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify Elasticsearch pods are running
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
+    register: elasticsearch_pods
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Get Elasticsearch version
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.spec.version}'
-      register: elasticsearch_version
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Get Elasticsearch version
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.spec.version}'
+    register: elasticsearch_version
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Check Elasticsearch storage
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pvc -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
-      register: elasticsearch_storage
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check Elasticsearch storage
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pvc -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
+    register: elasticsearch_storage
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Verify Elasticsearch service endpoints
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get endpoints elasticsearch-es-http -o jsonpath='{.subsets[0].addresses[0].ip}'
-      register: elasticsearch_endpoint
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify Elasticsearch service endpoints
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get endpoints elasticsearch-es-http -o jsonpath='{.subsets[0].addresses[0].ip}'
+    register: elasticsearch_endpoint
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Verify Elasticsearch NodePort service
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get svc elasticsearch-es-nodeport -o jsonpath='{.spec.ports[0].nodePort}'
-      register: elasticsearch_nodeport
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify Elasticsearch NodePort service
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get svc elasticsearch-es-nodeport -o jsonpath='{.spec.ports[0].nodePort}'
+    register: elasticsearch_nodeport
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Check if Elasticsearch is accessible via NodePort (directly in cluster)
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run curl-test --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://elasticsearch-es-http:9200
-      register: elasticsearch_internal_access
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check if Elasticsearch is accessible via NodePort (directly in cluster)
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run curl-test --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://elasticsearch-es-http:9200
+    register: elasticsearch_internal_access
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Check if Elasticsearch is accessible via NodePort (from outside)
-      shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
-      register: elasticsearch_nodeport_access
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
-      when: elasticsearch_nodeport.rc == 0
+  - name: Check if Elasticsearch is accessible via NodePort (from outside)
+    shell: |
+      curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
+    register: elasticsearch_nodeport_access
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
+    when: elasticsearch_nodeport.rc == 0
 
-    - name: Verify Elasticsearch secrets
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o name
-      register: elasticsearch_secret
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify Elasticsearch secrets
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o name
+    register: elasticsearch_secret
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Try to connect to Elasticsearch with credentials (internal test)
-      shell: |
-        PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run curl-auth-test --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 https://elasticsearch-es-http:9200
-      register: elasticsearch_internal_auth
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Try to connect to Elasticsearch with credentials (internal test)
+    shell: |
+      PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run curl-auth-test --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 https://elasticsearch-es-http:9200
+    register: elasticsearch_internal_auth
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Try to connect to Elasticsearch with credentials (external test)
-      shell: |
-        PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
-        curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
-      register: elasticsearch_external_auth
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
-      when: elasticsearch_nodeport.rc == 0
+  - name: Try to connect to Elasticsearch with credentials (external test)
+    shell: |
+      PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+      curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
+    register: elasticsearch_external_auth
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
+    when: elasticsearch_nodeport.rc == 0
 
-    - name: Display Elasticsearch verification results
-      debug:
-        msg:
-          - "Elasticsearch Verification Results:"
-          - "--------------------------------------"
-          - "Elasticsearch CR exists: {{ 'Yes' if elasticsearch_cr_exists.rc == 0 else 'No' }}"
-          - "Elasticsearch health: {{ elasticsearch_health.stdout if elasticsearch_health.rc == 0 else 'Unknown' }}"
-          - "Elasticsearch pods status: {{ elasticsearch_pods.stdout if elasticsearch_pods.rc == 0 else 'No pods found' }}"
-          - "Elasticsearch version: {{ elasticsearch_version.stdout if elasticsearch_version.rc == 0 else 'Unknown' }}"
-          - "Storage status: {{ elasticsearch_storage.stdout if elasticsearch_storage.rc == 0 else 'Unknown' }}"
-          - "Elasticsearch endpoint IP: {{ elasticsearch_endpoint.stdout if elasticsearch_endpoint.rc == 0 else 'N/A' }}"
-          - "NodePort: {{ elasticsearch_nodeport.stdout if elasticsearch_nodeport.rc == 0 else 'Not configured' }}"
-          - "Internal cluster access: {{ elasticsearch_internal_access.stdout if elasticsearch_internal_access.rc == 0 else 'Failed' }}"
-          - "External NodePort access: {{ elasticsearch_nodeport_access.stdout if elasticsearch_nodeport_access is defined and elasticsearch_nodeport_access.rc == 0 else 'Not tested' }}"
-          - "Elastic user secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else 'No' }}"
-          - "Internal authentication check: {{ elasticsearch_internal_auth.stdout if elasticsearch_internal_auth.rc == 0 else 'Failed' }}"
-          - "External authentication check: {{ elasticsearch_external_auth.stdout if elasticsearch_external_auth is defined and elasticsearch_external_auth.rc == 0 else 'Not tested' }}"
-          - "--------------------------------------"
-          - "Overall status: {{ 'HEALTHY' if elasticsearch_cr_exists.rc == 0 and elasticsearch_health.stdout in ['green', 'yellow'] and 'Running' in elasticsearch_pods.stdout and elasticsearch_secret.rc == 0 else 'ISSUES DETECTED' }}"
-      no_log: false
+  - name: Display Elasticsearch verification results
+    debug:
+      msg:
+      - 'Elasticsearch Verification Results:'
+      - '--------------------------------------'
+      - "Elasticsearch CR exists: {{ 'Yes' if elasticsearch_cr_exists.rc == 0 else
+        'No' }}"
+      - "Elasticsearch health: {{ elasticsearch_health.stdout if elasticsearch_health.rc
+        == 0 else 'Unknown' }}"
+      - "Elasticsearch pods status: {{ elasticsearch_pods.stdout if elasticsearch_pods.rc
+        == 0 else 'No pods found' }}"
+      - "Elasticsearch version: {{ elasticsearch_version.stdout if elasticsearch_version.rc
+        == 0 else 'Unknown' }}"
+      - "Storage status: {{ elasticsearch_storage.stdout if elasticsearch_storage.rc
+        == 0 else 'Unknown' }}"
+      - "Elasticsearch endpoint IP: {{ elasticsearch_endpoint.stdout if elasticsearch_endpoint.rc
+        == 0 else 'N/A' }}"
+      - "NodePort: {{ elasticsearch_nodeport.stdout if elasticsearch_nodeport.rc ==
+        0 else 'Not configured' }}"
+      - "Internal cluster access: {{ elasticsearch_internal_access.stdout if elasticsearch_internal_access.rc
+        == 0 else 'Failed' }}"
+      - "External NodePort access: {{ elasticsearch_nodeport_access.stdout if elasticsearch_nodeport_access
+        is defined and elasticsearch_nodeport_access.rc == 0 else 'Not tested' }}"
+      - "Elastic user secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else
+        'No' }}"
+      - "Internal authentication check: {{ elasticsearch_internal_auth.stdout if elasticsearch_internal_auth.rc
+        == 0 else 'Failed' }}"
+      - "External authentication check: {{ elasticsearch_external_auth.stdout if elasticsearch_external_auth
+        is defined and elasticsearch_external_auth.rc == 0 else 'Not tested' }}"
+      - '--------------------------------------'
+      - "Overall status: {{ 'HEALTHY' if elasticsearch_cr_exists.rc == 0 and elasticsearch_health.stdout
+        in ['green', 'yellow'] and 'Running' in elasticsearch_pods.stdout and elasticsearch_secret.rc
+        == 0 else 'ISSUES DETECTED' }}"
+    no_log: false
 
-    - name: Get detailed pod status
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch | grep -A5 "Conditions:" || echo "No detailed conditions found"
-      register: pod_conditions
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Get detailed pod status
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch | grep -A5 "Conditions:" || echo "No detailed conditions found"
+    register: pod_conditions
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Show pod conditions
-      debug:
-        msg: "{{ pod_conditions.stdout_lines }}"
+  - name: Show pod conditions
+    debug:
+      msg: '{{ pod_conditions.stdout_lines }}'
 
-    - name: Check Elasticsearch cluster health
-      shell: |
-        PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run health-check --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -u "elastic:$PASSWORD" https://elasticsearch-es-http:9200/_cluster/health
-      register: cluster_health
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check Elasticsearch cluster health
+    shell: |
+      PASSWORD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} run health-check --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- curl -k -s -u "elastic:$PASSWORD" https://elasticsearch-es-http:9200/_cluster/health
+    register: cluster_health
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Show cluster health
-      debug:
-        msg: "{{ cluster_health.stdout | default('Could not get cluster health') }}"
+  - name: Show cluster health
+    debug:
+      msg: "{{ cluster_health.stdout | default('Could not get cluster health') }}"
 
-    - name: Set verification status with more flexible criteria
-      set_fact:
-        elasticsearch_healthy: >-
-          {{
-            elasticsearch_cr_exists.rc == 0 and
-            elasticsearch_health.stdout in ['green', 'yellow'] and
-            'Running' in elasticsearch_pods.stdout and
-            elasticsearch_secret.rc == 0
-          }}
+  - name: Set verification status with more flexible criteria
+    set_fact:
+      elasticsearch_healthy: >-
+        {{
+          elasticsearch_cr_exists.rc == 0 and
+          elasticsearch_health.stdout in ['green', 'yellow'] and
+          'Running' in elasticsearch_pods.stdout and
+          elasticsearch_secret.rc == 0
+        }}
 
-    - name: Display final verification status
-      debug:
-        msg: >-
-          Elasticsearch appears to be {{ 'HEALTHY' if elasticsearch_healthy else 'UNHEALTHY' }}.
-          Pod is running: {{ 'Yes' if 'Running' in elasticsearch_pods.stdout else 'No' }}
-          Cluster status: {{ elasticsearch_health.stdout if elasticsearch_health.rc == 0 else 'Unknown' }}
-          Secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else 'No' }}
+  - name: Display final verification status
+    debug:
+      msg: >-
+        Elasticsearch appears to be {{ 'HEALTHY' if elasticsearch_healthy else 'UNHEALTHY'
+        }}.
+        Pod is running: {{ 'Yes' if 'Running' in elasticsearch_pods.stdout else 'No'
+        }}
+        Cluster status: {{ elasticsearch_health.stdout if elasticsearch_health.rc
+        == 0 else 'Unknown' }}
+        Secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else 'No' }}
 
-    - name: Fail if Elasticsearch is not healthy (with override option)
-      fail:
-        msg: "Elasticsearch verification failed. See output above for details."
-      when: not elasticsearch_healthy and (force_fail | default(true))
+  - name: Fail if Elasticsearch is not healthy (with override option)
+    fail:
+      msg: Elasticsearch verification failed. See output above for details.
+    when: not elasticsearch_healthy and (force_fail | default(true))

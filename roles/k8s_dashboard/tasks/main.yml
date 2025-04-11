@@ -1,4 +1,3 @@
----
 - name: Download Helm install script
   get_url:
     url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
@@ -17,13 +16,14 @@
 - name: Ensure required variables are defined
   set_fact:
     node_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
-    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig') }}"
+    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig')
+      }}"
 
 - name: Check if Kubernetes Dashboard is already installed
   command: helm list -n kubernetes-dashboard -q
   register: dashboard_installed
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
   ignore_errors: yes
@@ -32,14 +32,14 @@
   command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
   when: "'kubernetes-dashboard' in dashboard_installed.stdout"
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Add Kubernetes Dashboard Helm repository
   command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
   ignore_errors: yes
@@ -47,7 +47,7 @@
 - name: Update Helm repositories
   command: helm repo update
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
@@ -56,13 +56,13 @@
     helm install kubernetes-dashboard k8s-dashboard/kubernetes-dashboard
     --namespace kubernetes-dashboard --create-namespace
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Create dashboard admin service account
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
@@ -75,7 +75,7 @@
 
 - name: Create cluster role binding for dashboard admin
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: rbac.authorization.k8s.io/v1
@@ -83,9 +83,9 @@
       metadata:
         name: dashboard-admin-binding
       subjects:
-        - kind: ServiceAccount
-          name: dashboard-admin
-          namespace: kubernetes-dashboard
+      - kind: ServiceAccount
+        name: dashboard-admin
+        namespace: kubernetes-dashboard
       roleRef:
         kind: ClusterRole
         name: cluster-admin
@@ -95,7 +95,7 @@
 
 - name: Create long-lived token for dashboard admin
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
@@ -111,7 +111,8 @@
 
 - name: Wait for token to be generated
   command: >
-    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard get secret dashboard-admin-token -o jsonpath='{.data.token}'
+    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard get secret dashboard-admin-token
+    -o jsonpath='{.data.token}'
   register: token_check
   until: token_check.stdout != ""
   retries: 10
@@ -124,13 +125,13 @@
     src: dashboard-ingress.yml.j2
     dest: /tmp/dashboard-ingress.yml
   vars:
-    node_ip: "{{ node_ip }}"
+    node_ip: '{{ node_ip }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no
 
 - name: Apply Ingress for Kubernetes Dashboard
   command: kubectl apply -f /tmp/dashboard-ingress.yml
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: no

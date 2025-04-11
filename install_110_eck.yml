@@ -1,13 +1,12 @@
----
 - name: Complete ECK Installation
   hosts: utility
   gather_facts: false
   tasks:
-    - name: Display installation start information
-      debug:
-        msg:
-          - "Starting ECK installation process..."
-          - "This will install the ECK operator, Elasticsearch, Kibana, and configure ingress."
+  - name: Display installation start information
+    debug:
+      msg:
+      - Starting ECK installation process...
+      - This will install the ECK operator, Elasticsearch, Kibana, and configure ingress.
 
 - import_playbook: install_112_eck_operator.yml
 - import_playbook: install_114_eck_elasticsearch.yml

@@ -1,191 +1,209 @@
----
 # filepath: /home/user/ansible_homelab_kubernetes/verify_070_traefik.yml
 - name: Verify Traefik installation and dashboard access
   hosts: utility
   become: false
   gather_facts: false
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
     traefik_namespace: kube-system
-    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
-    dashboard_subdomain: "traefik"
-    
+    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+      }}"
+    dashboard_subdomain: traefik
   tasks:
     # 1. Check if kubeconfig exists
-    - name: Ensure kubeconfig exists
-      stat:
-        path: "{{ kubeconfig_path }}"
-      register: kubeconfig_stat
-      
-    - name: Fail if kubeconfig doesn't exist
-      fail:
-        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
-      when: not kubeconfig_stat.stat.exists
+  - name: Ensure kubeconfig exists
+    stat:
+      path: '{{ kubeconfig_path }}'
+    register: kubeconfig_stat
+
+  - name: Fail if kubeconfig doesn't exist
+    fail:
+      msg: Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
+        first.
+    when: not kubeconfig_stat.stat.exists
 
     # 2. Check if Traefik deployment exists
-    - name: Check Traefik deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o name || echo "not found"
-      register: traefik_deployment
-      changed_when: false
+  - name: Check Traefik deployment
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o name || echo "not found"
+    register: traefik_deployment
+    changed_when: false
 
-    - name: Check Traefik deployment status
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o jsonpath='{.status.readyReplicas}'
-      register: traefik_ready_replicas
-      changed_when: false
-      when: "'not found' not in traefik_deployment.stdout"
+  - name: Check Traefik deployment status
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace }} -o jsonpath='{.status.readyReplicas}'
+    register: traefik_ready_replicas
+    changed_when: false
+    when: "'not found' not in traefik_deployment.stdout"
 
     # 3. Check Traefik services
-    - name: Check Traefik services
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get service traefik -n {{ traefik_namespace }} -o name || echo "not found"
-      register: traefik_service
-      changed_when: false
+  - name: Check Traefik services
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get service traefik -n {{ traefik_namespace }} -o name || echo "not found"
+    register: traefik_service
+    changed_when: false
 
-    - name: Get Traefik web nodePort
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get svc traefik -n {{ traefik_namespace }} -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
-      register: traefik_web_port
-      changed_when: false
-      when: "'not found' not in traefik_service.stdout"
+  - name: Get Traefik web nodePort
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get svc traefik -n {{ traefik_namespace }} -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+    register: traefik_web_port
+    changed_when: false
+    when: "'not found' not in traefik_service.stdout"
 
     # 4. Verify Traefik CRDs
-    - name: Check for Traefik CRDs
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
-      register: crd_check
-      changed_when: false
+  - name: Check for Traefik CRDs
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
+    register: crd_check
+    changed_when: false
 
     # 5. Check IngressRoutes for dashboard
-    - name: Check dashboard IngressRoute
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute traefik-dashboard -n {{ traefik_namespace }} -o name || echo "not found"
-      register: dashboard_route
-      changed_when: false
+  - name: Check dashboard IngressRoute
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute traefik-dashboard -n {{ traefik_namespace }} -o name || echo "not found"
+    register: dashboard_route
+    changed_when: false
 
-    - name: Check direct IngressRoute
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute traefik-dashboard-direct -n {{ traefik_namespace }} -o name || echo "not found"
-      register: direct_route
-      changed_when: false
+  - name: Check direct IngressRoute
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute traefik-dashboard-direct -n {{ traefik_namespace }} -o name || echo "not found"
+    register: direct_route
+    changed_when: false
 
     # 6. Check auth middleware
-    - name: Check auth middleware
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get middleware traefik-dashboard-auth -n {{ traefik_namespace }} -o name || echo "not found"
-      register: auth_middleware
-      changed_when: false
+  - name: Check auth middleware
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get middleware traefik-dashboard-auth -n {{ traefik_namespace }} -o name || echo "not found"
+    register: auth_middleware
+    changed_when: false
 
-    - name: Check auth secret
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get secret traefik-dashboard-auth -n {{ traefik_namespace }} -o name || echo "not found"
-      register: auth_secret
-      changed_when: false
+  - name: Check auth secret
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get secret traefik-dashboard-auth -n {{ traefik_namespace }} -o name || echo "not found"
+    register: auth_secret
+    changed_when: false
 
     # 7. Test dashboard access
-    - name: Test dashboard access via domain
-      uri:
-        url: "http://{{ dashboard_subdomain }}.{{ control_plane_ip }}.nip.io/dashboard/"
-        method: GET
-        user: admin
-        password: admin
-        status_code: [200, 401]  # Either success or auth required is acceptable
-        validate_certs: false
-        follow_redirects: all
-      register: domain_access
-      ignore_errors: true
+  - name: Test dashboard access via domain
+    uri:
+      url: http://{{ dashboard_subdomain }}.{{ control_plane_ip }}.nip.io/dashboard/
+      method: GET
+      user: admin
+      password: admin
+      status_code: [200, 401]    # Either success or auth required is acceptable
+      validate_certs: false
+      follow_redirects: all
+    register: domain_access
+    ignore_errors: true
 
-    - name: Test dashboard access via direct IP
-      uri:
-        url: "http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80') }}/dashboard/"
-        method: GET
-        user: admin
-        password: admin
-        status_code: [200, 401]  # Either success or auth required is acceptable
-        validate_certs: false
-        follow_redirects: all
-      register: direct_access
-      ignore_errors: true
+  - name: Test dashboard access via direct IP
+    uri:
+      url: http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80')
+        }}/dashboard/
+      method: GET
+      user: admin
+      password: admin
+      status_code: [200, 401]    # Either success or auth required is acceptable
+      validate_certs: false
+      follow_redirects: all
+    register: direct_access
+    ignore_errors: true
 
     # 8. Check for HelmChartConfig
-    - name: Check HelmChartConfig
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get helmchartconfig traefik -n {{ traefik_namespace }} -o name || echo "not found"
-      register: helm_config
-      changed_when: false
+  - name: Check HelmChartConfig
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get helmchartconfig traefik -n {{ traefik_namespace }} -o name || echo "not found"
+    register: helm_config
+    changed_when: false
 
     # 9. Generate verification report
-    - name: Display Traefik verification summary
-      debug:
-        msg:
-          - "==================== TRAEFIK VERIFICATION SUMMARY ===================="
-          - "Traefik Deployment:"
-          - "  - Status: {{ 'Present' if 'not found' not in traefik_deployment.stdout else 'Not installed' }}"
-          - "  - Ready Replicas: {{ traefik_ready_replicas.stdout | default('0') if 'not found' not in traefik_deployment.stdout else 'N/A' }}"
-          - ""
-          - "Traefik Service:"
-          - "  - Status: {{ 'Present' if 'not found' not in traefik_service.stdout else 'Not installed' }}"
-          - "  - Web NodePort: {{ traefik_web_port.stdout | default('Not exposed') if 'not found' not in traefik_service.stdout else 'N/A' }}"
-          - ""
-          - "Traefik CRDs:" 
-          - "  - Status: {{ 'Installed' if 'NO_CRD' not in crd_check.stdout else 'Not installed' }}"
-          - "  - Found: {{ crd_check.stdout.split() | join(', ') if 'NO_CRD' not in crd_check.stdout else 'None' }}"
-          - ""
-          - "Dashboard Configuration:"
-          - "  - HelmChartConfig: {{ 'Present' if 'not found' not in helm_config.stdout else 'Not configured' }}"
-          - "  - IngressRoute (Domain): {{ 'Configured' if 'not found' not in dashboard_route.stdout else 'Not configured' }}"
-          - "  - IngressRoute (Direct): {{ 'Configured' if 'not found' not in direct_route.stdout else 'Not configured' }}"
-          - "  - Auth Middleware: {{ 'Configured' if 'not found' not in auth_middleware.stdout else 'Not configured' }}"
-          - "  - Auth Secret: {{ 'Present' if 'not found' not in auth_secret.stdout else 'Not configured' }}"
-          - ""
-          - "Access Verification:"
-          - "  - Domain Access: {{ 'Success (' + domain_access.status|string + ')' if domain_access is defined and domain_access.status in [200, 401] else 'Failed or not accessible' }}"
-          - "  - Direct IP Access: {{ 'Success (' + direct_access.status|string + ')' if direct_access is defined and direct_access.status in [200, 401] else 'Failed or not accessible' }}"
-          - ""
-          - "Dashboard URLs:"
-          - "  - Domain: http://{{ dashboard_subdomain }}.{{ control_plane_ip }}.nip.io/dashboard/"
-          - "  - Direct: http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80') }}/dashboard/"
-          - "  - Local (via port-forward): http://localhost:9000/dashboard/"
-          - ""
-          - "Credentials:"
-          - "  - Username: admin"
-          - "  - Password: admin"
-          - ""
-          - "Troubleshooting:"
-          - "  - To port-forward locally: ./scripts/dashboard.sh"
-          - "  - If you get a 401 Unauthorized, make sure you're using the correct credentials"
-          - "  - For certificate errors, try direct IP access"
-          - "=================================================================="
+  - name: Display Traefik verification summary
+    debug:
+      msg:
+      - ==================== TRAEFIK VERIFICATION SUMMARY ====================
+      - 'Traefik Deployment:'
+      - "  - Status: {{ 'Present' if 'not found' not in traefik_deployment.stdout
+        else 'Not installed' }}"
+      - "  - Ready Replicas: {{ traefik_ready_replicas.stdout | default('0') if 'not
+        found' not in traefik_deployment.stdout else 'N/A' }}"
+      - ''
+      - 'Traefik Service:'
+      - "  - Status: {{ 'Present' if 'not found' not in traefik_service.stdout else
+        'Not installed' }}"
+      - "  - Web NodePort: {{ traefik_web_port.stdout | default('Not exposed') if
+        'not found' not in traefik_service.stdout else 'N/A' }}"
+      - ''
+      - 'Traefik CRDs:'
+      - "  - Status: {{ 'Installed' if 'NO_CRD' not in crd_check.stdout else 'Not
+        installed' }}"
+      - "  - Found: {{ crd_check.stdout.split() | join(', ') if 'NO_CRD' not in crd_check.stdout
+        else 'None' }}"
+      - ''
+      - 'Dashboard Configuration:'
+      - "  - HelmChartConfig: {{ 'Present' if 'not found' not in helm_config.stdout
+        else 'Not configured' }}"
+      - "  - IngressRoute (Domain): {{ 'Configured' if 'not found' not in dashboard_route.stdout
+        else 'Not configured' }}"
+      - "  - IngressRoute (Direct): {{ 'Configured' if 'not found' not in direct_route.stdout
+        else 'Not configured' }}"
+      - "  - Auth Middleware: {{ 'Configured' if 'not found' not in auth_middleware.stdout
+        else 'Not configured' }}"
+      - "  - Auth Secret: {{ 'Present' if 'not found' not in auth_secret.stdout else
+        'Not configured' }}"
+      - ''
+      - 'Access Verification:'
+      - "  - Domain Access: {{ 'Success (' + domain_access.status|string + ')' if
+        domain_access is defined and domain_access.status in [200, 401] else 'Failed
+        or not accessible' }}"
+      - "  - Direct IP Access: {{ 'Success (' + direct_access.status|string + ')'
+        if direct_access is defined and direct_access.status in [200, 401] else 'Failed
+        or not accessible' }}"
+      - ''
+      - 'Dashboard URLs:'
+      - '  - Domain: http://{{ dashboard_subdomain }}.{{ control_plane_ip }}.nip.io/dashboard/'
+      - "  - Direct: http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80')
+        }}/dashboard/"
+      - '  - Local (via port-forward): http://localhost:9000/dashboard/'
+      - ''
+      - 'Credentials:'
+      - '  - Username: admin'
+      - '  - Password: admin'
+      - ''
+      - 'Troubleshooting:'
+      - '  - To port-forward locally: ./scripts/dashboard.sh'
+      - "  - If you get a 401 Unauthorized, make sure you're using the correct credentials"
+      - '  - For certificate errors, try direct IP access'
+      - ==================================================================
 
     # 10. Optional: Check for potential issues and provide fixes
-    - name: Check Traefik logs for common issues
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} logs -n {{ traefik_namespace }} -l app.kubernetes.io/name=traefik --tail=50 | grep -i 'error\|warn\|fail' || echo "No obvious errors found"
-      register: traefik_logs
-      changed_when: false
-      ignore_errors: true
+  - name: Check Traefik logs for common issues
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} logs -n {{ traefik_namespace }} -l app.kubernetes.io/name=traefik --tail=50 | grep -i 'error\|warn\|fail' || echo "No obvious errors found"
+    register: traefik_logs
+    changed_when: false
+    ignore_errors: true
 
-    - name: Display troubleshooting information if needed
-      debug:
-        msg:
-          - "Potential issues detected in Traefik logs:"
-          - "{{ traefik_logs.stdout_lines }}"
-      when: >
-        traefik_logs.stdout != "No obvious errors found" or
-        ('not found' in traefik_deployment.stdout) or
-        ('not found' in dashboard_route.stdout and 'not found' in direct_route.stdout) or
-        (traefik_ready_replicas is defined and traefik_ready_replicas.stdout == '0')
+  - name: Display troubleshooting information if needed
+    debug:
+      msg:
+      - 'Potential issues detected in Traefik logs:'
+      - '{{ traefik_logs.stdout_lines }}'
+    when: >
+      traefik_logs.stdout != "No obvious errors found" or
+      ('not found' in traefik_deployment.stdout) or
+      ('not found' in dashboard_route.stdout and 'not found' in direct_route.stdout)
+      or
+      (traefik_ready_replicas is defined and traefik_ready_replicas.stdout == '0')
 
-    - name: Check endpoints defined in IngressRoutes
-      shell: |
-        echo "HTTP Routes:"
-        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute -A -o jsonpath='{range .items[*]}{.metadata.name} -> entryPoints: {.spec.entryPoints[*]}{"\n"}{end}'
-        echo "TLS Config:"
-        kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute -A -o jsonpath='{range .items[*]}{.metadata.name} -> TLS: {.spec.tls}{"\n"}{end}'
-      register: route_check
-      changed_when: false
+  - name: Check endpoints defined in IngressRoutes
+    shell: |
+      echo "HTTP Routes:"
+      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute -A -o jsonpath='{range .items[*]}{.metadata.name} -> entryPoints: {.spec.entryPoints[*]}{"\n"}{end}'
+      echo "TLS Config:"
+      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute -A -o jsonpath='{range .items[*]}{.metadata.name} -> TLS: {.spec.tls}{"\n"}{end}'
+    register: route_check
+    changed_when: false
 
-    - name: Display route information
-      debug:
-        msg: "{{ route_check.stdout_lines }}"
+  - name: Display route information
+    debug:
+      msg: '{{ route_check.stdout_lines }}'

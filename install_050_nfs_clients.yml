@@ -1,4 +1,3 @@
----
 - name: Configure NFS clients on all Kubernetes nodes
   hosts: k3s_control_plane:k3s_workers
   become: true
@@ -6,55 +5,56 @@
   vars:
     nfs_server: "{{ hostvars[groups['nfs_server'][0]]['ansible_host'] }}"
   tasks:
-    - name: Install NFS client packages
-      apt:
-        name:
-          - nfs-common
-          - rpcbind
-        state: present
-        update_cache: yes
+  - name: Install NFS client packages
+    apt:
+      name:
+      - nfs-common
+      - rpcbind
+      state: present
+      update_cache: yes
 
-    - name: Ensure rpcbind service is running
-      systemd:
-        name: rpcbind
-        state: started
-        enabled: yes
+  - name: Ensure rpcbind service is running
+    systemd:
+      name: rpcbind
+      state: started
+      enabled: yes
 
-    - name: Create test mount point
-      file:
-        path: /mnt/nfs_test
-        state: directory
-        mode: '0777'
+  - name: Create test mount point
+    file:
+      path: /mnt/nfs_test
+      state: directory
+      mode: '0777'
 
-    - name: Test NFS mount from server (will fail if NFS server not ready)
-      mount:
-        path: /mnt/nfs_test
-        src: "{{ nfs_server }}:/srv/nfs/kubernetes"
-        fstype: nfs
-        opts: noatime,soft
-        state: mounted
-      register: mount_test
-      ignore_errors: yes
+  - name: Test NFS mount from server (will fail if NFS server not ready)
+    mount:
+      path: /mnt/nfs_test
+      src: '{{ nfs_server }}:/srv/nfs/kubernetes'
+      fstype: nfs
+      opts: noatime,soft
+      state: mounted
+    register: mount_test
+    ignore_errors: yes
 
-    - name: Try writing to NFS mount
-      shell: |
-        echo "Test from {{ inventory_hostname }} at $(date)" > /mnt/nfs_test/client_test_{{ inventory_hostname }}.txt
-      when: mount_test is success
-      ignore_errors: yes
+  - name: Try writing to NFS mount
+    shell: |
+      echo "Test from {{ inventory_hostname }} at $(date)" > /mnt/nfs_test/client_test_{{ inventory_hostname }}.txt
+    when: mount_test is success
+    ignore_errors: yes
 
-    - name: Clean up test mount
-      mount:
-        path: /mnt/nfs_test
-        state: absent
-      when: mount_test is success
+  - name: Clean up test mount
+    mount:
+      path: /mnt/nfs_test
+      state: absent
+    when: mount_test is success
 
-    - name: Remove test mount point
-      file:
-        path: /mnt/nfs_test
-        state: absent
+  - name: Remove test mount point
+    file:
+      path: /mnt/nfs_test
+      state: absent
 
-    - name: Display client setup status
-      debug:
-        msg:
-          - "NFS client configured on {{ inventory_hostname }}"
-          - "Connection test to NFS server: {{ 'SUCCESS' if mount_test is success else 'FAILED - please check NFS server' }}"
+  - name: Display client setup status
+    debug:
+      msg:
+      - NFS client configured on {{ inventory_hostname }}
+      - "Connection test to NFS server: {{ 'SUCCESS' if mount_test is success else
+        'FAILED - please check NFS server' }}"

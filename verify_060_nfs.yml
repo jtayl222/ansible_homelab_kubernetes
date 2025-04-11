@@ -1,384 +1,390 @@
----
 - name: Verify NFS Storage Setup
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    test_namespace: "nfs-test"
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    test_namespace: nfs-test
     nfs_server_ip: "{{ hostvars[groups['nfs_server'][0]]['ansible_host'] }}"
-    nfs_path: "/srv/nfs/kubernetes"
+    nfs_path: /srv/nfs/kubernetes
 
   tasks:
-    - name: Verify NFS server is running
-      shell: |
-        ssh {{ hostvars[groups['nfs_server'][0]]['ansible_host'] }} "systemctl status nfs-server" | grep "Active:" || echo "NFS server not running"
-      register: nfs_service_status
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify NFS server is running
+    shell: |
+      ssh {{ hostvars[groups['nfs_server'][0]]['ansible_host'] }} "systemctl status nfs-server" | grep "Active:" || echo "NFS server not running"
+    register: nfs_service_status
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display NFS server status
-      debug:
-        msg: "{{ nfs_service_status.stdout_lines }}"
+  - name: Display NFS server status
+    debug:
+      msg: '{{ nfs_service_status.stdout_lines }}'
 
-    - name: Verify NFS exports on server
-      shell: |
-        ssh {{ nfs_server_ip }} "showmount -e" || echo "Could not query NFS exports"
-      register: nfs_exports
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify NFS exports on server
+    shell: |
+      ssh {{ nfs_server_ip }} "showmount -e" || echo "Could not query NFS exports"
+    register: nfs_exports
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display NFS exports
-      debug:
-        msg: "{{ nfs_exports.stdout_lines }}"
+  - name: Display NFS exports
+    debug:
+      msg: '{{ nfs_exports.stdout_lines }}'
 
-    - name: Check if NFS storage class exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get storageclass | grep nfs
-      register: nfs_storage_class
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check if NFS storage class exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get storageclass | grep nfs
+    register: nfs_storage_class
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display NFS storage class status
-      debug:
-        msg: "{{ nfs_storage_class.stdout_lines | default(['No NFS storage class found']) }}"
+  - name: Display NFS storage class status
+    debug:
+      msg: "{{ nfs_storage_class.stdout_lines | default(['No NFS storage class found'])
+        }}"
 
-    - name: Check for NFS provisioner pods
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get pods -A | grep -E 'nfs|provisioner'
-      register: nfs_provisioner_pods
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check for NFS provisioner pods
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get pods -A | grep -E 'nfs|provisioner'
+    register: nfs_provisioner_pods
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display NFS provisioner pods
-      debug:
-        msg: "{{ nfs_provisioner_pods.stdout_lines | default(['No NFS provisioner pods found']) }}"
+  - name: Display NFS provisioner pods
+    debug:
+      msg: "{{ nfs_provisioner_pods.stdout_lines | default(['No NFS provisioner pods
+        found']) }}"
 
-    - name: Create test namespace
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: "{{ test_namespace }}"
-      become: false
+  - name: Create test namespace
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: '{{ test_namespace }}'
+    become: false
 
-    - name: Create test PVC
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: PersistentVolumeClaim
-          metadata:
-            name: nfs-test-pvc
-            namespace: "{{ test_namespace }}"
-          spec:
-            accessModes:
-              - ReadWriteMany
-            resources:
-              requests:
-                storage: 1Gi
-            storageClassName: nfs-client
-      become: false
+  - name: Create test PVC
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: nfs-test-pvc
+          namespace: '{{ test_namespace }}'
+        spec:
+          accessModes:
+          - ReadWriteMany
+          resources:
+            requests:
+              storage: 1Gi
+          storageClassName: nfs-client
+    become: false
 
-    - name: Wait for PVC to be bound
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pvc nfs-test-pvc -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
-      register: pvc_status
-      until: pvc_status.stdout == "Bound"
-      retries: 10
-      delay: 5
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Wait for PVC to be bound
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pvc nfs-test-pvc -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
+    register: pvc_status
+    until: pvc_status.stdout == "Bound"
+    retries: 10
+    delay: 5
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display PVC status
-      debug:
-        msg: "PVC status: {{ pvc_status.stdout }}"
+  - name: Display PVC status
+    debug:
+      msg: 'PVC status: {{ pvc_status.stdout }}'
 
-    - name: Get PV name from PVC
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pvc nfs-test-pvc -o jsonpath='{.spec.volumeName}' 2>/dev/null || echo "No PV found"
-      register: pv_name
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Get PV name from PVC
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pvc nfs-test-pvc -o jsonpath='{.spec.volumeName}' 2>/dev/null || echo "No PV found"
+    register: pv_name
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display PV details
-      shell: |
-        if [ "{{ pv_name.stdout }}" != "No PV found" ]; then
-          kubectl --kubeconfig={{ kubeconfig_path }} get pv {{ pv_name.stdout }} -o yaml
-        else
-          echo "No PV to display"
-        fi
-      register: pv_details
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Display PV details
+    shell: |
+      if [ "{{ pv_name.stdout }}" != "No PV found" ]; then
+        kubectl --kubeconfig={{ kubeconfig_path }} get pv {{ pv_name.stdout }} -o yaml
+      else
+        echo "No PV to display"
+      fi
+    register: pv_details
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display PV information
-      debug:
-        msg: "{{ pv_details.stdout_lines }}"
+  - name: Display PV information
+    debug:
+      msg: '{{ pv_details.stdout_lines }}'
 
-    - name: Create test pod to write to NFS volume
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: nfs-test-pod
-            namespace: "{{ test_namespace }}"
-          spec:
-            containers:
-            - name: nfs-test
-              image: nginx:alpine
-              command:
-                - "/bin/sh"
-                - "-c"
-                - "echo 'NFS test successful at $(date)' > /data/test-file.txt && sleep 3600"
-              volumeMounts:
-              - name: nfs-volume
-                mountPath: /data
-            volumes:
+  - name: Create test pod to write to NFS volume
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: nfs-test-pod
+          namespace: '{{ test_namespace }}'
+        spec:
+          containers:
+          - name: nfs-test
+            image: nginx:alpine
+            command:
+            - /bin/sh
+            - -c
+            - echo 'NFS test successful at $(date)' > /data/test-file.txt && sleep
+              3600
+            volumeMounts:
             - name: nfs-volume
-              persistentVolumeClaim:
-                claimName: nfs-test-pvc
-            restartPolicy: Never
-      become: false
+              mountPath: /data
+          volumes:
+          - name: nfs-volume
+            persistentVolumeClaim:
+              claimName: nfs-test-pvc
+          restartPolicy: Never
+    become: false
 
-    - name: Wait for test pod to become running
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
-      register: pod_status
-      until: pod_status.stdout == "Running"
-      retries: 10
-      delay: 5
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Wait for test pod to become running
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
+    register: pod_status
+    until: pod_status.stdout == "Running"
+    retries: 10
+    delay: 5
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display test pod status
-      debug:
-        msg: "Test pod status: {{ pod_status.stdout }}"
+  - name: Display test pod status
+    debug:
+      msg: 'Test pod status: {{ pod_status.stdout }}'
 
-    - name: Check pod events if pod isn't running
-      shell: |
-        if [ "{{ pod_status.stdout }}" != "Running" ]; then
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get events --sort-by='.lastTimestamp' | grep nfs-test-pod || echo "No events found for pod"
-        else
-          echo "Pod is running, no need to check events"
-        fi
-      register: pod_events
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check pod events if pod isn't running
+    shell: |
+      if [ "{{ pod_status.stdout }}" != "Running" ]; then
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get events --sort-by='.lastTimestamp' | grep nfs-test-pod || echo "No events found for pod"
+      else
+        echo "Pod is running, no need to check events"
+      fi
+    register: pod_events
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display pod events
-      debug:
-        msg: "{{ pod_events.stdout_lines }}"
+  - name: Display pod events
+    debug:
+      msg: '{{ pod_events.stdout_lines }}'
 
-    - name: Describe pod for more details
-      shell: |
-        if [ "{{ pod_status.stdout }}" != "Running" ]; then
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} describe pod nfs-test-pod || echo "Cannot describe pod"
-        else
-          echo "Pod is running, no need to describe"
-        fi
-      register: pod_describe
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Describe pod for more details
+    shell: |
+      if [ "{{ pod_status.stdout }}" != "Running" ]; then
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} describe pod nfs-test-pod || echo "Cannot describe pod"
+      else
+        echo "Pod is running, no need to describe"
+      fi
+    register: pod_describe
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display pod description
-      debug:
-        msg: "{{ pod_describe.stdout_lines }}"
+  - name: Display pod description
+    debug:
+      msg: '{{ pod_describe.stdout_lines }}'
 
-    - name: Check PV mount details
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get pv {{ pv_name.stdout }} -o jsonpath='{.spec.nfs}{"\n"}' 2>/dev/null || echo "Cannot get PV details"
-      register: pv_mount_details
-      become: false
-      ignore_errors: true
-      changed_when: false
-      when: pv_name.stdout != "No PV found"
+  - name: Check PV mount details
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} get pv {{ pv_name.stdout }} -o jsonpath='{.spec.nfs}{"\n"}' 2>/dev/null || echo "Cannot get PV details"
+    register: pv_mount_details
+    become: false
+    ignore_errors: true
+    changed_when: false
+    when: pv_name.stdout != "No PV found"
 
-    - name: Display PV mount details
-      debug:
-        msg: "{{ pv_mount_details.stdout_lines }}"
-        verbosity: 0
-      when: pv_name.stdout != "No PV found"
+  - name: Display PV mount details
+    debug:
+      msg: '{{ pv_mount_details.stdout_lines }}'
+      verbosity: 0
+    when: pv_name.stdout != "No PV found"
 
-    - name: Verify NFS client is installed on nodes
-      shell: |
-        for node in $(kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o name | cut -d/ -f2); do
-          echo "--- Node: $node ---"
-          kubectl --kubeconfig={{ kubeconfig_path }} debug node/$node --image=busybox -- chroot /host sh -c "dpkg -l | grep nfs-common || echo 'nfs-common not found'"
-        done
-      register: nfs_client_check
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify NFS client is installed on nodes
+    shell: |
+      for node in $(kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o name | cut -d/ -f2); do
+        echo "--- Node: $node ---"
+        kubectl --kubeconfig={{ kubeconfig_path }} debug node/$node --image=busybox -- chroot /host sh -c "dpkg -l | grep nfs-common || echo 'nfs-common not found'"
+      done
+    register: nfs_client_check
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display NFS client status on nodes
-      debug:
-        msg: "{{ nfs_client_check.stdout_lines }}"
+  - name: Display NFS client status on nodes
+    debug:
+      msg: '{{ nfs_client_check.stdout_lines }}'
 
-    - name: Wait for file to be written
-      pause:
-        seconds: 20
-      when: pod_status.stdout == "Running"
+  - name: Wait for file to be written
+    pause:
+      seconds: 20
+    when: pod_status.stdout == "Running"
 
-    - name: Verify file was written to NFS volume
-      shell: |
-        if [ "{{ pod_status.stdout }}" == "Running" ]; then
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} exec nfs-test-pod -- cat /data/test-file.txt || echo "Could not read file"
-        else
-          echo "Pod not running, cannot verify file"
-        fi
-      register: file_content
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify file was written to NFS volume
+    shell: |
+      if [ "{{ pod_status.stdout }}" == "Running" ]; then
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} exec nfs-test-pod -- cat /data/test-file.txt || echo "Could not read file"
+      else
+        echo "Pod not running, cannot verify file"
+      fi
+    register: file_content
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display file content
-      debug:
-        msg: "{{ file_content.stdout_lines }}"
+  - name: Display file content
+    debug:
+      msg: '{{ file_content.stdout_lines }}'
 
-    - name: Create test pod on another node to verify ReadWriteMany access
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Pod
-          metadata:
-            name: nfs-test-pod2
-            namespace: "{{ test_namespace }}"
-          spec:
-            affinity:
-              podAntiAffinity:
-                requiredDuringSchedulingIgnoredDuringExecution:
-                  - labelSelector:
-                      matchExpressions:
-                        - key: name
-                          operator: In
-                          values:
-                            - nfs-test-pod
-                    topologyKey: "kubernetes.io/hostname"
-            containers:
-            - name: nfs-test
-              image: nginx:alpine
-              command:
-                - "/bin/sh"
-                - "-c"
-                - "echo 'NFS test from second pod at $(date)' >> /data/test-file.txt && sleep 3600"
-              volumeMounts:
-              - name: nfs-volume
-                mountPath: /data
-            volumes:
+  - name: Create test pod on another node to verify ReadWriteMany access
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Pod
+        metadata:
+          name: nfs-test-pod2
+          namespace: '{{ test_namespace }}'
+        spec:
+          affinity:
+            podAntiAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+              - labelSelector:
+                  matchExpressions:
+                  - key: name
+                    operator: In
+                    values:
+                    - nfs-test-pod
+                topologyKey: kubernetes.io/hostname
+          containers:
+          - name: nfs-test
+            image: nginx:alpine
+            command:
+            - /bin/sh
+            - -c
+            - echo 'NFS test from second pod at $(date)' >> /data/test-file.txt &&
+              sleep 3600
+            volumeMounts:
             - name: nfs-volume
-              persistentVolumeClaim:
-                claimName: nfs-test-pvc
-            restartPolicy: Never
-      become: false
+              mountPath: /data
+          volumes:
+          - name: nfs-volume
+            persistentVolumeClaim:
+              claimName: nfs-test-pvc
+          restartPolicy: Never
+    become: false
 
-    - name: Wait for second test pod to become running
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod2 -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
-      register: pod2_status
-      until: pod2_status.stdout == "Running"
-      retries: 10
-      delay: 5
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Wait for second test pod to become running
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod2 -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
+    register: pod2_status
+    until: pod2_status.stdout == "Running"
+    retries: 10
+    delay: 5
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Wait for second file to be written
-      pause:
-        seconds: 10
-      when: pod2_status.stdout == "Running"
+  - name: Wait for second file to be written
+    pause:
+      seconds: 10
+    when: pod2_status.stdout == "Running"
 
-    - name: Verify file was updated by second pod
-      shell: |
-        if [ "{{ pod2_status.stdout }}" == "Running" ]; then
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} exec nfs-test-pod2 -- cat /data/test-file.txt || echo "Could not read file"
-        else
-          echo "Second pod not running, cannot verify file"
-        fi
-      register: updated_file_content
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Verify file was updated by second pod
+    shell: |
+      if [ "{{ pod2_status.stdout }}" == "Running" ]; then
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} exec nfs-test-pod2 -- cat /data/test-file.txt || echo "Could not read file"
+      else
+        echo "Second pod not running, cannot verify file"
+      fi
+    register: updated_file_content
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display updated file content
-      debug:
-        msg: "{{ updated_file_content.stdout_lines }}"
+  - name: Display updated file content
+    debug:
+      msg: '{{ updated_file_content.stdout_lines }}'
 
-    - name: Check node placement for pods
-      shell: |
-        echo "Pod 1 node: $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod -o jsonpath='{.spec.nodeName}')"
-        echo "Pod 2 node: $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod2 -o jsonpath='{.spec.nodeName}')"
-      register: pod_placement
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check node placement for pods
+    shell: |
+      echo "Pod 1 node: $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod -o jsonpath='{.spec.nodeName}')"
+      echo "Pod 2 node: $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ test_namespace }} get pod nfs-test-pod2 -o jsonpath='{.spec.nodeName}')"
+    register: pod_placement
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display pod placement
-      debug:
-        msg: "{{ pod_placement.stdout_lines }}"
+  - name: Display pod placement
+    debug:
+      msg: '{{ pod_placement.stdout_lines }}'
 
-    - name: Check NFS server directory for test file
-      shell: |
-        ssh {{ nfs_server_ip }} "find /srv/nfs/kubernetes -name 'test-file.txt' | xargs cat" || echo "Could not find test file on NFS server"
-      register: server_file_content
-      become: false
-      ignore_errors: true
-      changed_when: false
+  - name: Check NFS server directory for test file
+    shell: |
+      ssh {{ nfs_server_ip }} "find /srv/nfs/kubernetes -name 'test-file.txt' | xargs cat" || echo "Could not find test file on NFS server"
+    register: server_file_content
+    become: false
+    ignore_errors: true
+    changed_when: false
 
-    - name: Display server file content
-      debug:
-        msg: "{{ server_file_content.stdout_lines }}"
+  - name: Display server file content
+    debug:
+      msg: '{{ server_file_content.stdout_lines }}'
 
-    - name: Cleanup test resources
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: absent
-        definition:
-          apiVersion: v1
-          kind: Namespace
-          metadata:
-            name: "{{ test_namespace }}"
-      become: false
-      when: pod_status.stdout == "Running" or pod2_status.stdout == "Running"
+  - name: Cleanup test resources
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: absent
+      definition:
+        apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: '{{ test_namespace }}'
+    become: false
+    when: pod_status.stdout == "Running" or pod2_status.stdout == "Running"
 
-    - name: NFS verification summary
-      debug:
-        msg:
-          - "======== NFS VERIFICATION SUMMARY ========"
-          - "NFS Server Status: {{ 'RUNNING' if 'Active: active' in nfs_service_status.stdout else 'NOT RUNNING' }}"
-          - "NFS Storage Class: {{ 'EXISTS' if nfs_storage_class.stdout else 'MISSING' }}"
-          - "NFS Provisioner: {{ 'RUNNING' if nfs_provisioner_pods.stdout else 'NOT RUNNING' }}"
-          - "PVC Creation: {{ 'SUCCESS' if pvc_status.stdout == 'Bound' else 'FAILED' }}"
-          - "Pod Mount: {{ 'SUCCESS' if pod_status.stdout == 'Running' else 'FAILED' }}"
-          - "File Writing: {{ 'SUCCESS' if 'NFS test successful' in file_content.stdout else 'FAILED' }}"
-          - "ReadWriteMany access: {{ 'SUCCESS' if pod2_status.stdout == 'Running' and 'second pod' in updated_file_content.stdout else 'FAILED' }}"
-          - "Different node scheduling: {{ 'SUCCESS' if pod_placement.stdout and pod_placement.stdout_lines[0] != pod_placement.stdout_lines[1] else 'FAILED' }}"
-          - "========================================"
-          - "{{ 'All NFS tests passed!' if 
-                ('Active: active' in nfs_service_status.stdout) and 
-                nfs_storage_class.stdout and 
-                nfs_provisioner_pods.stdout and 
-                (pvc_status.stdout == 'Bound') and 
-                (pod_status.stdout == 'Running') and 
-                ('NFS test successful' in file_content.stdout) and 
-                (pod2_status.stdout == 'Running') and 
-                ('second pod' in updated_file_content.stdout) 
-                else 'One or more NFS tests failed. See details above.' }}"
+  - name: NFS verification summary
+    debug:
+      msg:
+      - ======== NFS VERIFICATION SUMMARY ========
+      - "NFS Server Status: {{ 'RUNNING' if 'Active: active' in nfs_service_status.stdout
+        else 'NOT RUNNING' }}"
+      - "NFS Storage Class: {{ 'EXISTS' if nfs_storage_class.stdout else 'MISSING'
+        }}"
+      - "NFS Provisioner: {{ 'RUNNING' if nfs_provisioner_pods.stdout else 'NOT RUNNING'
+        }}"
+      - "PVC Creation: {{ 'SUCCESS' if pvc_status.stdout == 'Bound' else 'FAILED'
+        }}"
+      - "Pod Mount: {{ 'SUCCESS' if pod_status.stdout == 'Running' else 'FAILED' }}"
+      - "File Writing: {{ 'SUCCESS' if 'NFS test successful' in file_content.stdout
+        else 'FAILED' }}"
+      - "ReadWriteMany access: {{ 'SUCCESS' if pod2_status.stdout == 'Running' and
+        'second pod' in updated_file_content.stdout else 'FAILED' }}"
+      - "Different node scheduling: {{ 'SUCCESS' if pod_placement.stdout and pod_placement.stdout_lines[0]
+        != pod_placement.stdout_lines[1] else 'FAILED' }}"
+      - ========================================
+      - "{{ 'All NFS tests passed!' if ('Active: active' in nfs_service_status.stdout)
+        and nfs_storage_class.stdout and nfs_provisioner_pods.stdout and (pvc_status.stdout
+        == 'Bound') and (pod_status.stdout == 'Running') and ('NFS test successful'
+        in file_content.stdout) and (pod2_status.stdout == 'Running') and ('second
+        pod' in updated_file_content.stdout) else 'One or more NFS tests failed. See
+        details above.' }}"

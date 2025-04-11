@@ -1,619 +1,622 @@
----
 - name: Install Kibana manually (without ECK)
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    elastic_namespace: "elastic"
-    kibana_version: "8.8.1"
-    elastic_version: "8.8.1"  # Added to match kibana_version
+    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    elastic_namespace: elastic
+    kibana_version: 8.8.1
+    elastic_version: 8.8.1    # Added to match kibana_version
     kibana_nodeport: 30056
 
   tasks:
-    - name: Verify Elasticsearch is available
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}' 2>/dev/null || echo "Not Ready"
-      register: es_health
-      until: es_health.stdout == "green"
-      retries: 5
-      delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      changed_when: false
+  - name: Verify Elasticsearch is available
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch elasticsearch -o jsonpath='{.status.health}' 2>/dev/null || echo "Not Ready"
+    register: es_health
+    until: es_health.stdout == "green"
+    retries: 5
+    delay: 10
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    changed_when: false
 
-    - name: Delete existing Kibana ECK deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete kibana kibana --wait=false
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Delete existing Kibana ECK deployment
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete kibana kibana --wait=false
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Delete existing Kibana manual deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete deployment kibana --wait=false
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana --wait=false
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana-nodeport --wait=false
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana-kb-nodeport --wait=false
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Delete existing Kibana manual deployment
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete deployment kibana --wait=false
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana --wait=false
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana-nodeport --wait=false
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana-kb-nodeport --wait=false
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Wait for Kibana ECK to be deleted
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get kibana kibana 2>/dev/null || echo "Kibana deleted"
-      register: kibana_deleted
-      until: '"Kibana deleted" in kibana_deleted.stdout'
-      retries: 15
-      delay: 5
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Wait for Kibana ECK to be deleted
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get kibana kibana 2>/dev/null || echo "Kibana deleted"
+    register: kibana_deleted
+    until: '"Kibana deleted" in kibana_deleted.stdout'
+    retries: 15
+    delay: 5
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Get elastic user password
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
-      register: elastic_password
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      changed_when: false
-      no_log: true
+  - name: Get elastic user password
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
+    register: elastic_password
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    changed_when: false
+    no_log: true
 
-    - name: Get kibana_system password from secret
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret kibana-credentials -o jsonpath='{.data.kibana-password}' | base64 -d
-      register: kibana_password_from_secret
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      changed_when: false
-      no_log: true
+  - name: Get kibana_system password from secret
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret kibana-credentials -o jsonpath='{.data.kibana-password}' | base64 -d
+    register: kibana_password_from_secret
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    changed_when: false
+    no_log: true
 
-    - name: Create kibana_system user secret
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: kibana-es-creds
-            namespace: "{{ elastic_namespace }}"
-          type: Opaque
-          stringData:
-            username: kibana_system
-            password: "{{ kibana_password_from_secret.stdout }}"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create kibana_system user secret
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: kibana-es-creds
+          namespace: '{{ elastic_namespace }}'
+        type: Opaque
+        stringData:
+          username: kibana_system
+          password: '{{ kibana_password_from_secret.stdout }}'
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Wait for ES pod for exec commands
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
-      register: es_pod_name
-      until: es_pod_name.stdout != ""
-      retries: 10
-      delay: 5
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Wait for ES pod for exec commands
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+    register: es_pod_name
+    until: es_pod_name.stdout != ""
+    retries: 10
+    delay: 5
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create kibana_system user in Elasticsearch - Check if exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" "https://localhost:9200/_security/user/kibana_system" | grep -q "kibana_system" || echo "not_found"
-      register: kibana_user_exists
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Create kibana_system user in Elasticsearch - Check if exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" "https://localhost:9200/_security/user/kibana_system" | grep -q "kibana_system" || echo "not_found"
+    register: kibana_user_exists
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Update kibana_system user password if exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system/_password" -H "Content-Type: application/json" -d '{"password":"{{ kibana_password_from_secret.stdout }}"}'
-      when: kibana_user_exists.stdout != "not_found"
-      register: kibana_pwd_update
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Update kibana_system user password if exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system/_password" -H "Content-Type: application/json" -d '{"password":"{{ kibana_password_from_secret.stdout }}"}'
+    when: kibana_user_exists.stdout != "not_found"
+    register: kibana_pwd_update
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Create kibana_system user if not exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{"password":"{{ kibana_password_from_secret.stdout }}", "roles":["kibana_system"]}'
-      when: kibana_user_exists.stdout == "not_found"
-      register: kibana_user_create
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Create kibana_system user if not exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{"password":"{{ kibana_password_from_secret.stdout }}", "roles":["kibana_system"]}'
+    when: kibana_user_exists.stdout == "not_found"
+    register: kibana_user_create
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Test kibana_system user authentication
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" "https://localhost:9200/_security/_authenticate" | grep -o "kibana_system" || echo "Authentication failed"
-      register: kibana_auth_test
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Test kibana_system user authentication
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" "https://localhost:9200/_security/_authenticate" | grep -o "kibana_system" || echo "Authentication failed"
+    register: kibana_auth_test
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Display kibana_system auth test result
-      debug:
-        msg: "{{ kibana_auth_test.stdout }}"
+  - name: Display kibana_system auth test result
+    debug:
+      msg: '{{ kibana_auth_test.stdout }}'
 
-    - name: Verify kibana_system role exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
-      register: kibana_role_check
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Verify kibana_system role exists
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
+    register: kibana_role_check
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Display kibana_system role information
-      debug:
-        msg: "{{ kibana_role_check.stdout }}"
+  - name: Display kibana_system role information
+    debug:
+      msg: '{{ kibana_role_check.stdout }}'
 
-    - name: Create kibana_system role if missing
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/role/kibana_system" -H "Content-Type: application/json" -d '{
-          "cluster": ["monitor", "manage_index_templates", "manage_ilm", "manage", "manage_own_api_key"],
-          "indices": [
-            {
-              "names": [ ".kibana*", ".reporting*", ".apm-agent-configuration", ".apm-custom-link", ".fleet*" ],
-              "privileges": ["all"]
-            },
-            {
-              "names": [ "kibana_sample*" ],
-              "privileges": ["read", "view_index_metadata"]
-            }
-          ],
-          "applications": [
-            {
-              "application": "kibana-*",
-              "privileges": ["all"],
-              "resources": ["*"]
-            }
-          ],
-          "run_as": []
-        }'
-      register: kibana_role_create
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
-      when: "'kibana_system' not in kibana_role_check.stdout"
-
-    - name: Delete and recreate kibana_system user with proper roles
-      shell: |
-        # Delete user first
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X DELETE "https://localhost:9200/_security/user/kibana_system" || echo "User deletion failed"
-        
-        # Create user with proper roles
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{
-          "password": "{{ kibana_password_from_secret.stdout }}",
-          "roles": ["kibana_system"],
-          "full_name": "Kibana System User",
-          "email": "kibana@localhost",
-          "metadata": {
-            "created_by": "ansible"
+  - name: Create kibana_system role if missing
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/role/kibana_system" -H "Content-Type: application/json" -d '{
+        "cluster": ["monitor", "manage_index_templates", "manage_ilm", "manage", "manage_own_api_key"],
+        "indices": [
+          {
+            "names": [ ".kibana*", ".reporting*", ".apm-agent-configuration", ".apm-custom-link", ".fleet*" ],
+            "privileges": ["all"]
+          },
+          {
+            "names": [ "kibana_sample*" ],
+            "privileges": ["read", "view_index_metadata"]
           }
-        }'
-      register: kibana_user_recreate
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+        ],
+        "applications": [
+          {
+            "application": "kibana-*",
+            "privileges": ["all"],
+            "resources": ["*"]
+          }
+        ],
+        "run_as": []
+      }'
+    register: kibana_role_create
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
+    when: "'kibana_system' not in kibana_role_check.stdout"
 
-    - name: Test kibana_system user authentication again
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -sv -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
-      register: kibana_auth_test_again
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Delete and recreate kibana_system user with proper roles
+    shell: |
+      # Delete user first
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X DELETE "https://localhost:9200/_security/user/kibana_system" || echo "User deletion failed"
 
-    - name: Display authentication test results
-      debug:
-        msg: "{{ kibana_auth_test_again.stdout_lines }}"
+      # Create user with proper roles
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{
+        "password": "{{ kibana_password_from_secret.stdout }}",
+        "roles": ["kibana_system"],
+        "full_name": "Kibana System User",
+        "email": "kibana@localhost",
+        "metadata": {
+          "created_by": "ansible"
+        }
+      }'
+    register: kibana_user_recreate
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Get Elasticsearch CA certificate
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-http-ca-internal -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/elasticsearch-ca.crt
-        cat /tmp/elasticsearch-ca.crt
-      register: es_ca_cert
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      changed_when: false
+  - name: Test kibana_system user authentication again
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- curl -sv -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
+    register: kibana_auth_test_again
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Create Kibana config map
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: kibana-config
-            namespace: "{{ elastic_namespace }}"
-          data:
-            kibana.yml: |
-              server.name: kibana
-              server.host: "0.0.0.0"
-              server.publicBaseUrl: "https://{{ hostvars['NUC8i5BEHS']['ansible_host'] | default('192.168.1.85') }}:{{ kibana_nodeport }}/kibana"
-              server.basePath: "/kibana"
-              server.rewriteBasePath: true
-              elasticsearch.hosts: ["https://elasticsearch-es-http.{{ elastic_namespace }}.svc:9200"]
-              elasticsearch.username: "kibana_system"
-              elasticsearch.password: "{{ kibana_password_from_secret.stdout }}"
-              elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca.crt"]
-              elasticsearch.ssl.verificationMode: "none"
-              server.ssl.enabled: true
-              server.ssl.certificate: /usr/share/kibana/config/certs/tls.crt
-              server.ssl.key: /usr/share/kibana/config/certs/tls.key
-              server.cors.enabled: true
-              server.cors.allowOrigin: ["*"]
-              xpack.reporting.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
-              xpack.security.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
-              xpack.encryptedSavedObjects.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
-              logging.root.level: debug
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Display authentication test results
+    debug:
+      msg: '{{ kibana_auth_test_again.stdout_lines }}'
 
-    - name: Create Elasticsearch CA certificate secret
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: kibana-elasticsearch-ca
-            namespace: "{{ elastic_namespace }}"
-          type: Opaque
-          stringData:
-            ca.crt: "{{ es_ca_cert.stdout }}"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Get Elasticsearch CA certificate
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get secret elasticsearch-es-http-ca-internal -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/elasticsearch-ca.crt
+      cat /tmp/elasticsearch-ca.crt
+    register: es_ca_cert
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    changed_when: false
 
-    - name: Create self-signed certificate for Kibana
-      shell: |
-        mkdir -p /tmp/kibana-certs
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-          -keyout /tmp/kibana-certs/tls.key \
-          -out /tmp/kibana-certs/tls.crt \
-          -subj "/CN=kibana"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create Kibana config map
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: kibana-config
+          namespace: '{{ elastic_namespace }}'
+        data:
+          kibana.yml: |
+            server.name: kibana
+            server.host: "0.0.0.0"
+            server.publicBaseUrl: "https://{{ hostvars['NUC8i5BEHS']['ansible_host'] | default('192.168.1.85') }}:{{ kibana_nodeport }}/kibana"
+            server.basePath: "/kibana"
+            server.rewriteBasePath: true
+            elasticsearch.hosts: ["https://elasticsearch-es-http.{{ elastic_namespace }}.svc:9200"]
+            elasticsearch.username: "kibana_system"
+            elasticsearch.password: "{{ kibana_password_from_secret.stdout }}"
+            elasticsearch.ssl.certificateAuthorities: ["/usr/share/kibana/config/certs/ca.crt"]
+            elasticsearch.ssl.verificationMode: "none"
+            server.ssl.enabled: true
+            server.ssl.certificate: /usr/share/kibana/config/certs/tls.crt
+            server.ssl.key: /usr/share/kibana/config/certs/tls.key
+            server.cors.enabled: true
+            server.cors.allowOrigin: ["*"]
+            xpack.reporting.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
+            xpack.security.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
+            xpack.encryptedSavedObjects.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
+            logging.root.level: debug
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create Kibana TLS secret
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: kibana-tls
-            namespace: "{{ elastic_namespace }}"
-          type: kubernetes.io/tls
-          data:
-            tls.crt: "{{ lookup('file', '/tmp/kibana-certs/tls.crt') | b64encode }}"
-            tls.key: "{{ lookup('file', '/tmp/kibana-certs/tls.key') | b64encode }}"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create Elasticsearch CA certificate secret
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: kibana-elasticsearch-ca
+          namespace: '{{ elastic_namespace }}'
+        type: Opaque
+        stringData:
+          ca.crt: '{{ es_ca_cert.stdout }}'
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create Kibana strip-prefix middleware
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: Middleware
-          metadata:
-            name: kibana-strip-prefix
-            namespace: elastic
-          spec:
-            stripPrefix:
-              prefixes: 
-                - "/kibana"
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create self-signed certificate for Kibana
+    shell: |
+      mkdir -p /tmp/kibana-certs
+      openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+        -keyout /tmp/kibana-certs/tls.key \
+        -out /tmp/kibana-certs/tls.crt \
+        -subj "/CN=kibana"
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create ServersTransport for insecure HTTPS
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: ServersTransport
-          metadata:
-            name: insecure-transport
-            namespace: "{{ elastic_namespace }}"
-          spec:
-            insecureSkipVerify: true
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create Kibana TLS secret
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Secret
+        metadata:
+          name: kibana-tls
+          namespace: '{{ elastic_namespace }}'
+        type: kubernetes.io/tls
+        data:
+          tls.crt: "{{ lookup('file', '/tmp/kibana-certs/tls.crt') | b64encode }}"
+          tls.key: "{{ lookup('file', '/tmp/kibana-certs/tls.key') | b64encode }}"
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create consolidated Kibana IngressRoute for HTTP
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: kibana-consolidated-http
-            namespace: "{{ elastic_namespace }}"
-            labels:
-              app: kibana
-          spec:
-            entryPoints:
-              - web
-            routes:
+  - name: Create Kibana strip-prefix middleware
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: traefik.io/v1alpha1
+        kind: Middleware
+        metadata:
+          name: kibana-strip-prefix
+          namespace: elastic
+        spec:
+          stripPrefix:
+            prefixes:
+            - /kibana
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+
+  - name: Create ServersTransport for insecure HTTPS
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: traefik.io/v1alpha1
+        kind: ServersTransport
+        metadata:
+          name: insecure-transport
+          namespace: '{{ elastic_namespace }}'
+        spec:
+          insecureSkipVerify: true
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+
+  - name: Create consolidated Kibana IngressRoute for HTTP
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: traefik.io/v1alpha1
+        kind: IngressRoute
+        metadata:
+          name: kibana-consolidated-http
+          namespace: '{{ elastic_namespace }}'
+          labels:
+            app: kibana
+        spec:
+          entryPoints:
+          - web
+          routes:
               # Host-based routing - NO path prefix stripping for direct access
-              - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.85') }}.nip.io`)
-                kind: Rule
-                services:
-                  - name: kibana
-                    port: 5601
-                    scheme: https
-                    serversTransport: insecure-transport
+          - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+              | default('192.168.1.85') }}.nip.io`)
+            kind: Rule
+            services:
+            - name: kibana
+              port: 5601
+              scheme: https
+              serversTransport: insecure-transport
               # Path-based routing - WITH path prefix stripping
-              - match: PathPrefix(`/kibana`)
-                kind: Rule
-                middlewares:
-                  - name: kibana-strip-prefix
-                services:
-                  - name: kibana
-                    port: 5601
-                    scheme: https
-                    serversTransport: insecure-transport
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+          - match: PathPrefix(`/kibana`)
+            kind: Rule
+            middlewares:
+            - name: kibana-strip-prefix
+            services:
+            - name: kibana
+              port: 5601
+              scheme: https
+              serversTransport: insecure-transport
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create consolidated Kibana IngressRoute for HTTPS
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: kibana-consolidated-https
-            namespace: "{{ elastic_namespace }}"
-            labels:
-              app: kibana
-          spec:
-            entryPoints:
-              - websecure
-            routes:
+  - name: Create consolidated Kibana IngressRoute for HTTPS
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: traefik.io/v1alpha1
+        kind: IngressRoute
+        metadata:
+          name: kibana-consolidated-https
+          namespace: '{{ elastic_namespace }}'
+          labels:
+            app: kibana
+        spec:
+          entryPoints:
+          - websecure
+          routes:
               # Host-based routing - NO path prefix stripping for direct access
-              - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.85') }}.nip.io`)
-                kind: Rule
-                services:
-                  - name: kibana
-                    port: 5601
-                    scheme: https
-                    serversTransport: insecure-transport
+          - match: Host(`kibana.local`) || Host(`kibana.{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+              | default('192.168.1.85') }}.nip.io`)
+            kind: Rule
+            services:
+            - name: kibana
+              port: 5601
+              scheme: https
+              serversTransport: insecure-transport
               # Path-based routing - WITH path prefix stripping
-              - match: PathPrefix(`/kibana`)
-                kind: Rule
-                middlewares:
-                  - name: kibana-strip-prefix
-                services:
-                  - name: kibana
-                    port: 5601
-                    scheme: https
-                    serversTransport: insecure-transport
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+          - match: PathPrefix(`/kibana`)
+            kind: Rule
+            middlewares:
+            - name: kibana-strip-prefix
+            services:
+            - name: kibana
+              port: 5601
+              scheme: https
+              serversTransport: insecure-transport
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Check current Kibana configuration
-      kubernetes.core.k8s_info:
-        kubeconfig: "{{ kubeconfig_path }}"
-        api_version: kibana.k8s.elastic.co/v1
+  - name: Check current Kibana configuration
+    kubernetes.core.k8s_info:
+      kubeconfig: '{{ kubeconfig_path }}'
+      api_version: kibana.k8s.elastic.co/v1
+      kind: Kibana
+      name: kibana
+      namespace: '{{ elastic_namespace }}'
+    register: kibana_config
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+
+  - name: Update Kibana with basePath configuration
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: kibana.k8s.elastic.co/v1
         kind: Kibana
-        name: kibana
-        namespace: "{{ elastic_namespace }}"
-      register: kibana_config
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+        metadata:
+          name: kibana
+          namespace: '{{ elastic_namespace }}'
+        spec:
+          version: '{{ kibana_version }}'
+          count: 1
+          elasticsearchRef:
+            name: elasticsearch
+          config:
+            server.basePath: /kibana
+            server.rewriteBasePath: true
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    when: >
+      kibana_config.resources is defined and
+      kibana_config.resources | length > 0 and
+      (kibana_config.resources[0].spec.config is not defined or
+       kibana_config.resources[0].spec.config['server.basePath'] is not defined)
 
-    - name: Update Kibana with basePath configuration
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: kibana.k8s.elastic.co/v1
-          kind: Kibana
-          metadata:
-            name: kibana
-            namespace: "{{ elastic_namespace }}"
-          spec:
-            version: "{{ kibana_version }}"
-            count: 1
-            elasticsearchRef:
-              name: elasticsearch
-            config:
-              server.basePath: "/kibana"
-              server.rewriteBasePath: true
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      when: >
-        kibana_config.resources is defined and
-        kibana_config.resources | length > 0 and
-        (kibana_config.resources[0].spec.config is not defined or 
-         kibana_config.resources[0].spec.config['server.basePath'] is not defined)
-
-    - name: Create Kibana deployment
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: kibana
-            namespace: "{{ elastic_namespace }}"
-            labels:
+  - name: Create Kibana deployment
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: kibana
+          namespace: '{{ elastic_namespace }}'
+          labels:
+            app: kibana
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
               app: kibana
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
+          template:
+            metadata:
+              labels:
                 app: kibana
-            template:
-              metadata:
-                labels:
-                  app: kibana
-              spec:
-                initContainers:
-                - name: init-certs-dir
-                  image: busybox:1.33.1
-                  command: ['sh', '-c', 'mkdir -p /usr/share/kibana/config/certs']
-                  volumeMounts:
-                  - name: config-dir
-                    mountPath: /usr/share/kibana/config
-                containers:
-                - name: kibana
-                  image: docker.elastic.co/kibana/kibana:{{ kibana_version }}
-                  ports:
-                  - containerPort: 5601
-                  env:
-                  - name: NODE_OPTIONS
-                    value: "--max-old-space-size=2048"
-                  - name: NODE_TLS_REJECT_UNAUTHORIZED
-                    value: "0"
-                  - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
-                    value: "none"
-                  - name: ELASTICSEARCH_USERNAME
-                    value: "kibana_system"
-                  - name: ELASTICSEARCH_PASSWORD
-                    value: "{{ kibana_password_from_secret.stdout }}"
-                  resources:
-                    requests:
-                      memory: 1Gi
-                      cpu: 0.5
-                    limits:
-                      memory: 2Gi
-                      cpu: 1
-                  readinessProbe:
-                    exec:
-                      command:
-                      - bash
-                      - -c
-                      - |
-                        #!/bin/bash
-                        # Check if Kibana is running by looking for the server process
-                        pgrep -f "node.*src/cli/dist" > /dev/null && exit 0 || exit 1
-                    initialDelaySeconds: 120
-                    periodSeconds: 15
-                    timeoutSeconds: 5
-                    failureThreshold: 10
-                  volumeMounts:
-                  - name: config
-                    mountPath: /usr/share/kibana/config/kibana.yml
-                    subPath: kibana.yml
-                  - name: config-dir
-                    mountPath: /usr/share/kibana/config
-                  - name: elasticsearch-ca-vol
-                    mountPath: /usr/share/kibana/config/certs/ca.crt
-                    subPath: ca.crt
-                  - name: kibana-tls-vol
-                    mountPath: /usr/share/kibana/config/certs/tls.crt
-                    subPath: tls.crt
-                  - name: kibana-tls-vol
-                    mountPath: /usr/share/kibana/config/certs/tls.key
-                    subPath: tls.key
-                volumes:
-                - name: config
-                  configMap:
-                    name: kibana-config
+            spec:
+              initContainers:
+              - name: init-certs-dir
+                image: busybox:1.33.1
+                command: [sh, -c, mkdir -p /usr/share/kibana/config/certs]
+                volumeMounts:
                 - name: config-dir
-                  emptyDir: {}
+                  mountPath: /usr/share/kibana/config
+              containers:
+              - name: kibana
+                image: docker.elastic.co/kibana/kibana:{{ kibana_version }}
+                ports:
+                - containerPort: 5601
+                env:
+                - name: NODE_OPTIONS
+                  value: --max-old-space-size=2048
+                - name: NODE_TLS_REJECT_UNAUTHORIZED
+                  value: '0'
+                - name: ELASTICSEARCH_SSL_VERIFICATIONMODE
+                  value: none
+                - name: ELASTICSEARCH_USERNAME
+                  value: kibana_system
+                - name: ELASTICSEARCH_PASSWORD
+                  value: '{{ kibana_password_from_secret.stdout }}'
+                resources:
+                  requests:
+                    memory: 1Gi
+                    cpu: 0.5
+                  limits:
+                    memory: 2Gi
+                    cpu: 1
+                readinessProbe:
+                  exec:
+                    command:
+                    - bash
+                    - -c
+                    - |
+                      #!/bin/bash
+                      # Check if Kibana is running by looking for the server process
+                      pgrep -f "node.*src/cli/dist" > /dev/null && exit 0 || exit 1
+                  initialDelaySeconds: 120
+                  periodSeconds: 15
+                  timeoutSeconds: 5
+                  failureThreshold: 10
+                volumeMounts:
+                - name: config
+                  mountPath: /usr/share/kibana/config/kibana.yml
+                  subPath: kibana.yml
+                - name: config-dir
+                  mountPath: /usr/share/kibana/config
                 - name: elasticsearch-ca-vol
-                  secret:
-                    secretName: kibana-elasticsearch-ca
+                  mountPath: /usr/share/kibana/config/certs/ca.crt
+                  subPath: ca.crt
                 - name: kibana-tls-vol
-                  secret:
-                    secretName: kibana-tls
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+                  mountPath: /usr/share/kibana/config/certs/tls.crt
+                  subPath: tls.crt
+                - name: kibana-tls-vol
+                  mountPath: /usr/share/kibana/config/certs/tls.key
+                  subPath: tls.key
+              volumes:
+              - name: config
+                configMap:
+                  name: kibana-config
+              - name: config-dir
+                emptyDir: {}
+              - name: elasticsearch-ca-vol
+                secret:
+                  secretName: kibana-elasticsearch-ca
+              - name: kibana-tls-vol
+                secret:
+                  secretName: kibana-tls
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create Kibana service
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: kibana
-            namespace: "{{ elastic_namespace }}"
-          spec:
-            selector:
-              app: kibana
-            ports:
-            - name: https
-              port: 5601
-              targetPort: 5601
-            type: ClusterIP
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create Kibana service
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: kibana
+          namespace: '{{ elastic_namespace }}'
+        spec:
+          selector:
+            app: kibana
+          ports:
+          - name: https
+            port: 5601
+            targetPort: 5601
+          type: ClusterIP
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Create Kibana NodePort service
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: kibana-nodeport
-            namespace: "{{ elastic_namespace }}"
-          spec:
-            selector:
-              app: kibana
-            ports:
-            - name: https
-              port: 5601
-              targetPort: 5601
-              nodePort: "{{ kibana_nodeport }}"
-            type: NodePort
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+  - name: Create Kibana NodePort service
+    kubernetes.core.k8s:
+      kubeconfig: '{{ kubeconfig_path }}'
+      state: present
+      definition:
+        apiVersion: v1
+        kind: Service
+        metadata:
+          name: kibana-nodeport
+          namespace: '{{ elastic_namespace }}'
+        spec:
+          selector:
+            app: kibana
+          ports:
+          - name: https
+            port: 5601
+            targetPort: 5601
+            nodePort: '{{ kibana_nodeport }}'
+          type: NodePort
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
 
-    - name: Wait for Kibana deployment to start
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} rollout status deployment/kibana
-      register: rollout_status
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Wait for Kibana deployment to start
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} rollout status deployment/kibana
+    register: rollout_status
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Get Kibana pod name
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l app=kibana -o jsonpath='{.items[0].metadata.name}'
-      register: kibana_pod_name
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Get Kibana pod name
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get pods -l app=kibana -o jsonpath='{.items[0].metadata.name}'
+    register: kibana_pod_name
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Check Kibana pod logs
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout }} || echo "No logs available yet"
-      register: kibana_logs
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+  - name: Check Kibana pod logs
+    shell: |
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout }} || echo "No logs available yet"
+    register: kibana_logs
+    delegate_to: "{{ groups['utility'][0] }}"
+    become: false
+    ignore_errors: true
 
-    - name: Display Kibana logs
-      debug:
-        msg: "{{ kibana_logs.stdout_lines }}"
+  - name: Display Kibana logs
+    debug:
+      msg: '{{ kibana_logs.stdout_lines }}'
 
-    - name: Display installation information
-      debug:
-        msg:
-          - "Kibana has been deployed manually without using ECK!"
-          - "--------------------------------------" 
-          - "Kibana is available at: https://{{ hostvars['NUC8i5BEHS']['ansible_host'] | default('192.168.1.85') }}:{{ kibana_nodeport }}/kibana"
-          - "Username: elastic"
-          - "Password: {{ elastic_password.stdout }}"
-          - "For Kibana internal auth:"
-          - "Username: kibana_system"
-          - "Password: {{ kibana_password_from_secret.stdout }}"
-          - "Pod name: {{ kibana_pod_name.stdout }}"
-          - "--------------------------------------"
-          - "IMPORTANT: Use HTTPS not HTTP to access Kibana!"
-          - "Note: It may take up to 5 minutes for Kibana to be fully available."
-          - "If you see a 404 error, try again after a few minutes."
-          - "To check logs: kubectl -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout }}"
+  - name: Display installation information
+    debug:
+      msg:
+      - Kibana has been deployed manually without using ECK!
+      - '--------------------------------------'
+      - "Kibana is available at: https://{{ hostvars['NUC8i5BEHS']['ansible_host']
+        | default('192.168.1.85') }}:{{ kibana_nodeport }}/kibana"
+      - 'Username: elastic'
+      - 'Password: {{ elastic_password.stdout }}'
+      - 'For Kibana internal auth:'
+      - 'Username: kibana_system'
+      - 'Password: {{ kibana_password_from_secret.stdout }}'
+      - 'Pod name: {{ kibana_pod_name.stdout }}'
+      - '--------------------------------------'
+      - 'IMPORTANT: Use HTTPS not HTTP to access Kibana!'
+      - 'Note: It may take up to 5 minutes for Kibana to be fully available.'
+      - If you see a 404 error, try again after a few minutes.
+      - 'To check logs: kubectl -n {{ elastic_namespace }} logs {{ kibana_pod_name.stdout
+        }}'
