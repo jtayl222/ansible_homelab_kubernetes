@@ -26,7 +26,7 @@ if [ -z "$CONTROL_PLANE_IP" ]; then
     echo -e "${YELLOW}not found automatically.${NC}"
     echo -n "Please enter your control plane IP address: "
     read -r CONTROL_PLANE_IP
-    
+
     if [ -z "$CONTROL_PLANE_IP" ]; then
         echo -e "${RED}No IP provided. Exiting.${NC}"
         exit 1
@@ -51,11 +51,11 @@ if [ -n "$HOSTS_CHECK" ]; then
         echo "Skipping hosts file update."
         exit 0
     fi
-    
+
     # Create a backup of the hosts file
     echo "Creating backup of /etc/hosts to /etc/hosts.bak"
     sudo cp /etc/hosts /etc/hosts.bak
-    
+
     # Remove existing entries
     echo "Removing existing Kubernetes homelab entries..."
     sudo sed -i '/# Kubernetes homelab services begin/,/# Kubernetes homelab services end/d' /etc/hosts
@@ -107,10 +107,10 @@ declare -a SERVICES=(
 for service in "${SERVICES[@]}"; do
     IFS=':' read -r host port path <<< "$service"
     echo -n "Testing $host... "
-    
+
     # Use curl with a short timeout to check if service is responding
     status=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 "http://$host$path" 2>/dev/null || echo "Failed")
-    
+
     if [[ "$status" =~ ^(2|3)[0-9][0-9]$ ]]; then
         echo -e "${GREEN}Online (HTTP $status)${NC}"
     elif [[ "$status" =~ ^4[0-9][0-9]$ ]]; then
@@ -186,7 +186,7 @@ if [ -z "$CONTROL_PLANE_IP" ]; then
     echo -e "${YELLOW}not found automatically.${NC}"
     echo -n "Please enter your control plane IP address: "
     read -r CONTROL_PLANE_IP
-    
+
     if [ -z "$CONTROL_PLANE_IP" ]; then
         echo -e "${RED}No IP provided. Exiting.${NC}"
         exit 1
@@ -211,11 +211,11 @@ if [ -n "$HOSTS_CHECK" ]; then
         echo "Skipping hosts file update."
         exit 0
     fi
-    
+
     # Create a backup of the hosts file
     echo "Creating backup of /etc/hosts to /etc/hosts.bak"
     sudo cp /etc/hosts /etc/hosts.bak
-    
+
     # Remove existing entries
     echo "Removing existing Kubernetes homelab entries..."
     sudo sed -i '/# Kubernetes homelab services begin/,/# Kubernetes homelab services end/d' /etc/hosts
@@ -270,10 +270,10 @@ declare -a SERVICES=(
 for service in "${SERVICES[@]}"; do
     IFS=':' read -r host port path <<< "$service"
     echo -n "Testing $host... "
-    
+
     # Use curl with a short timeout to check if service is responding
     status=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 "http://$host$path" 2>/dev/null || echo "Failed")
-    
+
     if [[ "$status" =~ ^(2|3)[0-9][0-9]$ ]]; then
         echo -e "${GREEN}Online (HTTP $status)${NC}"
     elif [[ "$status" =~ ^4[0-9][0-9]$ ]]; then

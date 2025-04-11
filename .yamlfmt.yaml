@@ -1,4 +1,3 @@
-# .yamlfmt.yaml
 formatter:
   indent: 2
   line_width: 120

@@ -326,12 +326,12 @@ print_status "Different node scheduling" "$SCHEDULING_STATUS"
 echo -e "${BLUE}${BOLD}========================================${NC}"
 
 # Overall result
-if [[ "$NFS_STATUS" == "RUNNING" && 
-      "$SC_STATUS" == "EXISTS" && 
-      "$PROVISIONER_STATUS" == "RUNNING" && 
-      "$PVC_STATUS" == "SUCCESS" && 
-      "$POD_STATUS" == "SUCCESS" && 
-      "$FILE_STATUS" == "SUCCESS" && 
+if [[ "$NFS_STATUS" == "RUNNING" &&
+      "$SC_STATUS" == "EXISTS" &&
+      "$PROVISIONER_STATUS" == "RUNNING" &&
+      "$PVC_STATUS" == "SUCCESS" &&
+      "$POD_STATUS" == "SUCCESS" &&
+      "$FILE_STATUS" == "SUCCESS" &&
       "$RWX_STATUS" == "SUCCESS" ]]; then
     echo -e "${GREEN}${BOLD}All NFS tests passed successfully!${NC}"
 else

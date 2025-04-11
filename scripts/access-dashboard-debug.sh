@@ -52,28 +52,28 @@ case "$choice" in
     ;;
   5)
     echo "Running full debug on dashboard connectivity..."
-    
+
     echo -e "\n=== Checking Dashboard Pod Status ==="
     kubectl --kubeconfig=$KUBECONFIG get pods -n kubernetes-dashboard -o wide
-    
+
     echo -e "\n=== Checking Dashboard Services ==="
     kubectl --kubeconfig=$KUBECONFIG get svc -n kubernetes-dashboard
-    
+
     echo -e "\n=== Checking IngressRoutes ==="
     kubectl --kubeconfig=$KUBECONFIG get ingressroute -n kubernetes-dashboard
-    
+
     echo -e "\n=== Checking Traefik Logs ==="
     kubectl --kubeconfig=$KUBECONFIG logs -n kube-system -l app.kubernetes.io/name=traefik --tail=20
-    
+
     echo -e "\n=== Checking Dashboard Web Pod Logs ==="
     WEB_POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n kubernetes-dashboard -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')
     kubectl --kubeconfig=$KUBECONFIG logs -n kubernetes-dashboard $WEB_POD
-    
+
     echo -e "\n=== Testing connectivity between components ==="
     kubectl --kubeconfig=$KUBECONFIG run -n kubernetes-dashboard debug-pod --image=curlimages/curl --rm -i --tty -- sh -c "
-    echo 'Testing web service:'; 
+    echo 'Testing web service:';
     curl -v kubernetes-dashboard-web.kubernetes-dashboard.svc.cluster.local:8000;
-    echo -e '\nTesting API service:'; 
+    echo -e '\nTesting API service:';
     curl -v kubernetes-dashboard-api.kubernetes-dashboard.svc.cluster.local:8000/api/v1/csrftoken;
     "
     ;;

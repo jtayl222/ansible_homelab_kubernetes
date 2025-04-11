@@ -29,7 +29,7 @@ if [ -z "$CONTROL_PLANE_IP" ]; then
     echo -e "${YELLOW}not found${NC}"
     echo -n "Please enter your control plane IP address: "
     read -r CONTROL_PLANE_IP
-    
+
     if [ -z "$CONTROL_PLANE_IP" ]; then
         CONTROL_PLANE_IP="localhost"
         echo "Using $CONTROL_PLANE_IP as fallback."
@@ -131,13 +131,13 @@ echo -e "${BOLD}Service Status:${NC}"
 check_service() {
     local name=$1
     local url=$2
-    
+
     echo -n "- $name: "
-    
+
     # Use curl with a short timeout to check if service is responding
     # We silence all output and just check the HTTP status code range
     status=$(curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 2 "$url" 2>/dev/null || echo "Failed")
-    
+
     if [[ "$status" =~ ^(2|3)[0-9][0-9]$ ]]; then
         echo -e "${GREEN}Online${NC} (HTTP $status)"
     elif [[ "$status" =~ ^4[0-9][0-9]$ ]]; then

@@ -19,7 +19,7 @@
       stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
-      
+
     - name: Fail if kubeconfig doesn't exist
       fail:
         msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
@@ -133,7 +133,7 @@
       register: install_result
       become: false
       changed_when: "'created' in install_result.stdout or 'configured' in install_result.stdout"
-      
+
     - name: Display installation results
       debug:
         msg: "{{ install_result.stdout_lines }}"
@@ -439,10 +439,10 @@
       shell: |
         echo "Checking for NetworkPolicies..."
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get networkpolicy -o name || echo "No NetworkPolicies found"
-        
+
         echo "Checking service endpoints..."
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get endpoints argo-server
-        
+
         echo "Checking if server is accessible internally..."
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} run -i --rm --restart=Never curl-test --image=curlimages/curl:7.82.0 -- \
           curl -s -k https://argo-server:2746/ -o /dev/null -w "%{http_code}\n" || echo "Internal connection test failed"
@@ -461,7 +461,7 @@
             echo "Scaled down deployments"
           register: scale_down
           become: false
-          
+
         - name: Wait for pods to terminate
           shell: |
             echo "Waiting for pods to terminate..."
@@ -479,7 +479,7 @@
           register: termination_wait
           become: false
           changed_when: false
-          
+
         - name: Check for remaining pods and force delete if necessary
           shell: |
             PODS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -o name)
@@ -493,7 +493,7 @@
           register: force_delete
           become: false
           changed_when: "'Force deleting' in force_delete.stdout"
-          
+
         - name: Apply resource limits to Argo deployments
           shell: |
             # Patch workflow-controller with resource limits
@@ -503,7 +503,7 @@
                 "limits": {"memory": "256Mi", "cpu": "200m"}
               }}
             ]'
-            
+
             # Patch argo-server with resource limits
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} patch deployment argo-server --type='json' -p='[
               {"op": "add", "path": "/spec/template/spec/containers/0/resources", "value": {
@@ -516,7 +516,7 @@
           become: false
           changed_when: true
           ignore_errors: true
-          
+
         - name: Scale up deployments one at a time
           shell: |
             echo "Scaling up workflow-controller first..."
@@ -538,16 +538,16 @@
         for i in $(seq 1 30); do
           STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
           READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment workflow-controller -o jsonpath='{.status.readyReplicas}')
-          
+
           if [ "$STATUS" = "True" ] && [ "$READY" = "1" ]; then
             echo "workflow-controller deployment is ready"
             exit 0
           fi
-          
+
           echo "Attempt $i: workflow-controller not ready yet. Status: $STATUS, Ready: $READY"
           echo "Pod details:"
           kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o wide
-          
+
           if [ "$i" = "10" ] || [ "$i" = "20" ]; then
             echo "Checking pod events:"
             POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
@@ -557,10 +557,10 @@
               kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
             fi
           fi
-          
+
           sleep 10
         done
-        
+
         echo "ERROR: Timed out waiting for workflow-controller deployment"
         POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=workflow-controller -o name | head -1)
         if [ -n "$POD" ]; then
@@ -574,23 +574,23 @@
       become: false
       changed_when: false
       ignore_errors: true
-          
+
     - name: Wait for argo-server with debugging
       shell: |
         echo "Checking argo-server status..."
         for i in $(seq 1 30); do
           STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
           READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.readyReplicas}')
-          
+
           if [ "$STATUS" = "True" ] && [ "$READY" = "1" ]; then
             echo "argo-server deployment is ready"
             exit 0
           fi
-          
+
           echo "Attempt $i: argo-server not ready yet. Status: $STATUS, Ready: $READY"
           echo "Pod details:"
           kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o wide
-          
+
           if [ "$i" = "10" ] || [ "$i" = "20" ]; then
             echo "Checking pod events:"
             POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
@@ -600,10 +600,10 @@
               kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} logs $POD --tail=20 || echo "Unable to get logs"
             fi
           fi
-          
+
           sleep 10
         done
-        
+
         echo "ERROR: Timed out waiting for argo-server deployment"
         POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
         if [ -n "$POD" ]; then
@@ -617,19 +617,19 @@
       become: false
       changed_when: false
       ignore_errors: true
-          
+
     - name: Check node resources
       shell: |
         echo "Checking node resources..."
         kubectl --kubeconfig={{ kubeconfig_path }} get nodes -o custom-columns=NAME:.metadata.name,CPU:.status.capacity.cpu,MEMORY:.status.capacity.memory
-        
+
         echo "Checking pods resources by node..."
         kubectl --kubeconfig={{ kubeconfig_path }} get pods -A -o wide | grep -v "NAME"
       register: node_resources
       become: false
       changed_when: false
       ignore_errors: true
-          
+
     - name: Display deployment status summary
       debug:
         msg:
@@ -647,25 +647,25 @@
         content: |
           #!/bin/bash
           # Script to generate a token for accessing Argo Workflows UI in Kubernetes 1.24+
-          
+
           NAMESPACE="argo"
           SA_NAME="argo-admin"
-          
+
           # Check if the service account exists
           if ! kubectl -n $NAMESPACE get serviceaccount $SA_NAME &>/dev/null; then
             echo "Service account $SA_NAME not found in namespace $NAMESPACE"
             exit 1
           fi
-          
+
           # Create a token using kubectl
           echo "Creating token for service account $SA_NAME..."
           TOKEN=$(kubectl -n $NAMESPACE create token $SA_NAME)
-          
+
           if [ -z "$TOKEN" ]; then
             echo "Failed to generate token for service account $SA_NAME"
             exit 1
           fi
-          
+
           echo "===== ARGO UI TOKEN ====="
           echo "$TOKEN"
           echo "========================="

@@ -67,6 +67,8 @@ curl -s -X POST "http://seldon.local/seldon/seldon-system/iris-model/api/v1.0/pr
      -d '{"data": {"ndarray": [[5.1, 3.5, 1.4, 0.2]]}}' \
      | head -c 200 || echo "Seldon Iris model check failed"
 
+# curl -X GET "http://seldon.local/seldon/seldon-system/iris-model/api/v1.0/doc/"
+
 echo
 echo "============ VERIFICATION COMPLETE ============"
 echo "Check the responses above. A valid 200 OK or JSON response typically indicates success."

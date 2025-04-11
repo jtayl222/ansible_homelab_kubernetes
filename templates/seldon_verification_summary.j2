@@ -1,0 +1,53 @@
+===========================================
+SELDON CORE VERIFICATION SUMMARY REPORT
+===========================================
+Date: {{ ansible_date_time.date }} {{ ansible_date_time.time }}
+Hostname: {{ ansible_hostname }}
+
+INSTALLATION STATUS:
+-------------------
+Seldon namespace: {% if 'not found' not in seldon_ns_check.stdout %}✓ Exists{% else %}❌ Not found{% endif %}
+Seldon Controller: {% if controller_status.rc == 0 and controller_status.stdout|int > 0 %}✓ Healthy ({{ controller_status.stdout }} replicas){% else %}❌ Unhealthy or not found{% endif %}
+Seldon CRDs: {% if 'not found' not in seldon_crd_check.stdout %}✓ Installed{% else %}❌ Not installed{% endif %}
+Seldon Version: {{ seldon_version.stdout if seldon_version.rc == 0 and seldon_version.stdout != '' else 'Unknown' }}
+
+DEPLOYMENT STATUS:
+-----------------
+Deployed models: {% if deployed_models.rc == 0 and deployed_models.stdout != '' %}{{ deployed_models.stdout_lines|join(', ') }}{% else %}None found{% endif %}
+Iris model: {% if iris_model_status.rc == 0 and 'not found' not in iris_model_status.stdout %}✓ Deployed (Status: {{ iris_model_status.stdout }}){% else %}❌ Not deployed{% endif %}
+Model pods: {% if model_pods_status.rc == 0 and model_pods_status.stdout != 'not found' %}✓ Running (Status: {{ model_pods_status.stdout }}){% else %}❌ No pods found{% endif %}
+
+ACCESS CONFIGURATION:
+-------------------
+NodePort service: {% if nodeport_service.rc == 0 and nodeport_service.stdout != 'not found' %}✓ Available on port {{ nodeport_service.stdout }}{% else %}❌ Not configured{% endif %}
+Seldon IngressRoute: {% if ingress_status.rc == 0 and 'not found' not in ingress_status.stdout %}✓ Configured{% else %}❌ Not configured or has different name{% endif %}
+Model IngressRoute: {% if model_ingress_status.rc == 0 and 'not found' not in model_ingress_status.stdout %}✓ Configured{% else %}❌ Not configured or has different name{% endif %}
+Model service: {% if model_service_name is defined and model_service_name.stdout is defined and model_service_name.stdout != '' %}✓ {{ model_service_name.stdout }}{% else %}❌ Not found{% endif %}
+
+API TESTS:
+---------
+Direct API test: {% if direct_api_test is defined and direct_api_test.stdout is defined and direct_api_test.stdout != '' and 'failed' not in direct_api_test.stdout %}✓ Successful{% elif direct_api_test is defined %}❌ Failed{% else %}⚠️ Not tested{% endif %}
+Ingress API test: {% if ingress_api_test is defined and ingress_api_test.stdout is defined and ingress_api_test.stdout != '' and 'failed' not in ingress_api_test.stdout %}✓ Successful{% elif ingress_api_test is defined %}❌ Failed{% else %}⚠️ Not tested{% endif %}
+
+STORAGE CONFIGURATION:
+--------------------
+MinIO Secret: {% if minio_secret_check.rc == 0 and 'not found' not in minio_secret_check.stdout %}✓ Configured{% else %}❌ Not configured{% endif %}
+
+RESOURCES:
+---------
+Examples directory: {% if examples_dir.stat.exists %}✓ Available at {{ playbook_dir }}/seldon-examples{% else %}❌ Not available{% endif %}
+Test script: {% if test_script.stat.exists %}✓ Available at {{ playbook_dir }}/seldon-examples/test-iris-model.sh{% else %}❌ Not available{% endif %}
+
+ACCESS INFO:
+-----------
+Seldon API URL (NodePort): http://{{ control_plane_ip }}:{{ seldon_nodeport }}/seldon/{{ seldon_namespace }}/{{ iris_model_name }}/api/v1.0/predictions
+Seldon API URL (Ingress): http://{{ seldon_host }}/seldon/{{ seldon_namespace }}/{{ iris_model_name }}/api/v1.0/predictions
+
+NEXT STEPS:
+----------
+1. To test the Iris model prediction: curl -s -X POST "http://{{ seldon_host }}/seldon/{{ seldon_namespace }}/{{ iris_model_name }}/api/v1.0/predictions" -H "Content-Type: application/json" -d @{{ test_data_path }}
+
+2. To deploy a new model, use a SeldonDeployment resource yaml file.
+
+3. For detailed debugging, check the pod logs and events: 
+   kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} logs -l seldon-deployment-id={{ iris_model_name }}

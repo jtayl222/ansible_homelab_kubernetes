@@ -135,7 +135,7 @@
                 - name: classifier
                   env:
                   - name: LOG_LEVEL
-                    value: "DEBUG"  # Enable debug logging
+                    value: "INFO"  # Enable debug logging
       mode: '0644'
     become: false
 
