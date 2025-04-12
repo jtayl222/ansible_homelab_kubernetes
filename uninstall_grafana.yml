@@ -3,261 +3,268 @@
   become: true
   gather_facts: true
   vars:
-    grafana_namespace: monitoring  # Match your existing namespace
-    grafana_release_name: grafana  # Match your existing release name
-    force_delete: false  # Set to true to force deletion if resources are stuck
-    backup_dashboards: true  # Set to true to back up existing dashboards
+    grafana_namespace: monitoring # Match your existing namespace
+    grafana_release_name: grafana # Match your existing release name
+    force_delete: false # Set to true to force deletion if resources are stuck
+    backup_dashboards: true # Set to true to back up existing dashboards
   tasks:
-  - name: Show target hosts
-    ansible.builtin.debug:
-      msg: 'Running on host: {{ inventory_hostname }} ({{ ansible_host }})'
+    - name: Show target hosts
+      ansible.builtin.ansible.builtin.debug:
+        msg: "Running on host: {{ inventory_hostname }} ({{ ansible_host }})"
 
-  - name: Setup KUBECONFIG environment variable
-    ansible.builtin.set_fact:
-      kubeconfig_env:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+    - name: Setup KUBECONFIG environment variable
+      ansible.builtin.set_fact:
+        kubeconfig_env:
+          KUBECONFIG: /etc/rancher/k3s/k3s.yaml
 
-  - name: Check if kubectl is available
-    ansible.builtin.command: kubectl version --client
-    register: kubectl_check
-    changed_when: false
-    failed_when: false
+    - name: Check if kubectl is available
+      ansible.builtin.command: kubectl version --client
+      register: kubectl_check
+      changed_when: false
+      failed_when: false
 
-  - name: Fail if kubectl is not available
-    ansible.builtin.fail:
-      msg: kubectl is not available or not properly configured
-    when: kubectl_check.rc != 0
+    - name: Fail if kubectl is not available
+      ansible.builtin.fail:
+        msg: kubectl is not available or not properly configured
+      when: kubectl_check.rc != 0
 
-  - name: Get all pods in the monitoring namespace
-    ansible.builtin.command: kubectl get pods -n {{ grafana_namespace }} -o wide
-    register: all_pods
-    changed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Get all pods in the monitoring namespace
+      ansible.builtin.command: kubectl get pods -n {{ grafana_namespace }} -o wide
+      register: all_pods
+      changed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Display all pods
-    ansible.builtin.debug:
-      var: all_pods.stdout_lines
+    - name: Display all pods
+      ansible.builtin.ansible.builtin.debug:
+        var: all_pods.stdout_lines
 
-  - name: Get Grafana pods specifically
-    ansible.builtin.command: kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
-      -o wide
-    register: grafana_pods_check
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Get Grafana pods specifically
+      ansible.builtin.command:
+        kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
+        -o wide
+      register: grafana_pods_check
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Display Grafana pods
-    ansible.builtin.debug:
-      var: grafana_pods_check.stdout_lines
+    - name: Display Grafana pods
+      ansible.builtin.ansible.builtin.debug:
+        var: grafana_pods_check.stdout_lines
 
-  - name: Check if Grafana is installed via Helm
-    ansible.builtin.command: helm list -n {{ grafana_namespace }} -f {{ grafana_release_name
-      }} -o yaml
-    register: helm_check
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Check if Grafana is installed via Helm
+      ansible.builtin.command:
+        helm list -n {{ grafana_namespace }} -f {{ grafana_release_name
+        }} -o yaml
+      register: helm_check
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Display Helm information if available
-    ansible.builtin.debug:
-      var: helm_check
-      verbosity: 1
+    - name: Display Helm information if available
+      ansible.builtin.ansible.builtin.debug:
+        var: helm_check
+        verbosity: 1
 
-    # Backup Grafana dashboards if requested
-  - name: Create backup directory
-    ansible.builtin.file:
-      path: /tmp/grafana-backup
-      state: directory
-      mode: '0755'
-    when: backup_dashboards | bool
+      # Backup Grafana dashboards if requested
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: /tmp/grafana-backup
+        state: directory
+        mode: "0755"
+      when: backup_dashboards | bool
 
-  - name: Get Grafana dashboards ConfigMaps
-    ansible.builtin.command: >
-      kubectl get configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 -o name
-    register: dashboard_configmaps
-    changed_when: false
-    environment: '{{ kubeconfig_env }}'
-    when: backup_dashboards | bool
+    - name: Get Grafana dashboards ConfigMaps
+      ansible.builtin.command: >
+        kubectl get configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 -o name
+      register: dashboard_configmaps
+      changed_when: false
+      environment: "{{ kubeconfig_env }}"
+      when: backup_dashboards | bool
 
-  - name: Backup each dashboard ConfigMap
-    ansible.builtin.shell: >
-      kubectl get {{ item }} -n {{ grafana_namespace }} -o yaml >  /tmp/grafana-backup/{{
-      item | basename }}.yaml
-    loop: '{{ dashboard_configmaps.stdout_lines }}'
-    environment: '{{ kubeconfig_env }}'
-    when: backup_dashboards | bool and dashboard_configmaps.stdout_lines | length
-      > 0
+    - name: Backup each dashboard ConfigMap
+      ansible.builtin.shell: >
+        kubectl get {{ item }} -n {{ grafana_namespace }} -o yaml >  /tmp/grafana-backup/{{
+        item | basename }}.yaml
+      loop: "{{ dashboard_configmaps.stdout_lines }}"
+      environment: "{{ kubeconfig_env }}"
+      when:
+        backup_dashboards | bool and dashboard_configmaps.stdout_lines | length
+        > 0
 
-  - name: Fetch backup files to control machine
-    ansible.builtin.fetch:
-      src: /tmp/grafana-backup/{{ item | basename }}.yaml
-      dest: ./grafana-backups/{{ ansible_date_time.iso8601 }}/{{ item | basename }}.yaml
-      flat: true
-    loop: '{{ dashboard_configmaps.stdout_lines }}'
-    when: backup_dashboards | bool and dashboard_configmaps.stdout_lines | length
-      > 0
+    - name: Fetch backup files to control machine
+      ansible.builtin.fetch:
+        src: /tmp/grafana-backup/{{ item | basename }}.yaml
+        dest: ./grafana-backups/{{ ansible_date_time.iso8601 }}/{{ item | basename }}.yaml
+        flat: true
+      loop: "{{ dashboard_configmaps.stdout_lines }}"
+      when:
+        backup_dashboards | bool and dashboard_configmaps.stdout_lines | length
+        > 0
 
-    # Uninstall Grafana via Helm if it was installed that way
-  - name: Uninstall Grafana via Helm
-    ansible.builtin.command: >
-      helm uninstall {{ grafana_release_name }} -n {{ grafana_namespace }}
-    register: helm_uninstall
-    changed_when: helm_uninstall.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-    when: helm_check.rc == 0 and helm_check.stdout | length > 0
+      # Uninstall Grafana via Helm if it was installed that way
+    - name: Uninstall Grafana via Helm
+      ansible.builtin.command: >
+        helm uninstall {{ grafana_release_name }} -n {{ grafana_namespace }}
+      register: helm_uninstall
+      changed_when: helm_uninstall.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+      when: helm_check.rc == 0 and helm_check.stdout | length > 0
 
-  - name: Wait for Helm uninstallation to complete
-    ansible.builtin.pause:
-      seconds: 30
-    when: helm_uninstall is defined and helm_uninstall.changed
+    - name: Wait for Helm uninstallation to complete
+      ansible.builtin.pause:
+        seconds: 30
+      when: helm_uninstall is defined and helm_uninstall.changed
 
-    # Clean up any remaining Grafana resources
-  - name: Delete Grafana deployment if it still exists
-    ansible.builtin.command: >
-      kubectl delete deployment {{ grafana_release_name }} -n {{ grafana_namespace
-      }} {% if force_delete %}--force --grace-period=0{% endif %}
-    register: deployment_delete
-    changed_when: deployment_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+      # Clean up any remaining Grafana resources
+    - name: Delete Grafana deployment if it still exists
+      ansible.builtin.command: >
+        kubectl \
+          delete deployment {{ grafana_release_name }} -n {{ grafana_namespace
+        }} {% if force_delete %}--force --grace-period=0{% endif %}
+      register: deployment_delete
+      changed_when: deployment_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana statefulset if it exists
-    ansible.builtin.command: >
-      kubectl delete statefulset {{ grafana_release_name }} -n {{ grafana_namespace
-      }} {% if force_delete %}--force --grace-period=0{% endif %}
-    register: statefulset_delete
-    changed_when: statefulset_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana statefulset if it exists
+      ansible.builtin.command: >
+        kubectl \
+          delete statefulset {{ grafana_release_name }} -n {{ grafana_namespace }} {% if force_delete %}--force --grace-period=0{% endif %}
+      register: statefulset_delete
+      changed_when: statefulset_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana services
-    ansible.builtin.command: >
-      kubectl delete service {{ grafana_release_name }} -n {{ grafana_namespace }}
-    register: service_delete
-    changed_when: service_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana services
+      ansible.builtin.command: >
+        kubectl \
+          delete service {{ grafana_release_name }} -n {{ grafana_namespace }}
+      register: service_delete
+      changed_when: service_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana ConfigMaps
-    ansible.builtin.command: >
-      kubectl delete configmap -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
-      grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif
-      %}
-    register: configmap_delete
-    changed_when: configmap_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana ConfigMaps
+      ansible.builtin.command: >
+        kubectl \
+          delete configmap -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+      register: configmap_delete
+      changed_when: configmap_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana dashboard ConfigMaps
-    ansible.builtin.command: >
-      kubectl delete configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 {%
-      if force_delete %}--force --grace-period=0{% endif %}
-    register: dashboard_configmap_delete
-    changed_when: dashboard_configmap_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana dashboard ConfigMaps
+      ansible.builtin.command: >
+        kubectl \
+          delete configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 {%
+        if force_delete %}--force --grace-period=0{% endif %}
+      register: dashboard_configmap_delete
+      changed_when: dashboard_configmap_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana secrets
-    ansible.builtin.command: >
-      kubectl delete secret -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
-      grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif
-      %}
-    register: secret_delete
-    changed_when: secret_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana secrets
+      ansible.builtin.command: >
+        kubectl \
+          delete secret -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+      register: secret_delete
+      changed_when: secret_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana ingress if it exists
-    ansible.builtin.command: >
-      kubectl delete ingress {{ grafana_release_name }} -n {{ grafana_namespace }}
-      {% if force_delete %}--force --grace-period=0{% endif %}
-    register: ingress_delete
-    changed_when: ingress_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana ingress if it exists
+      ansible.builtin.command: >
+        kubectl \
+          delete ingress {{ grafana_release_name }} -n {{ grafana_namespace }}
+        {% if force_delete %}--force --grace-period=0{% endif %}
+      register: ingress_delete
+      changed_when: ingress_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Delete Grafana PVCs if they exist
-    ansible.builtin.command: >
-      kubectl delete pvc -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
-      grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif
-      %}
-    register: pvc_delete
-    changed_when: pvc_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Delete Grafana PVCs if they exist
+      ansible.builtin.command: >
+        kubectl \
+          delete pvc -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+      register: pvc_delete
+      changed_when: pvc_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Check for any remaining Grafana pods
-    ansible.builtin.command: >
-      kubectl get pods -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
-      grafana_release_name }}" -o name
-    register: remaining_pods
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
+    - name: Check for any remaining Grafana pods
+      ansible.builtin.command: >
+        kubectl get pods -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
+        grafana_release_name }}" -o name
+      register: remaining_pods
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
 
-  - name: Force delete any remaining Grafana pods
-    ansible.builtin.command: >
-      kubectl delete {{ item }} -n {{ grafana_namespace }} --force --grace-period=0
-    loop: '{{ remaining_pods.stdout_lines }}'
-    register: pod_delete
-    changed_when: pod_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-    when: remaining_pods.stdout_lines | length > 0
+    - name: Force delete any remaining Grafana pods
+      ansible.builtin.command: >
+        kubectl \
+          delete {{ item }} -n {{ grafana_namespace }} --force --grace-period=0
+      loop: "{{ remaining_pods.stdout_lines }}"
+      register: pod_delete
+      changed_when: pod_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+      when: remaining_pods.stdout_lines | length > 0
 
-  - name: Determine the selector labels for Grafana
-    ansible.builtin.command: >
-      kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
-      -o jsonpath='{.items[0].metadata.labels}'
-    register: grafana_labels
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-  - name: Display Grafana labels
-    ansible.builtin.debug:
-      var: grafana_labels.stdout
-    when: grafana_labels.rc == 0
+    - name: Determine the selector labels for Grafana
+      ansible.builtin.command: >
+        kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
+        -o jsonpath='{.items[0].metadata.labels}'
+      register: grafana_labels
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+    - name: Display Grafana labels
+      ansible.builtin.ansible.builtin.debug:
+        var: grafana_labels.stdout
+      when: grafana_labels.rc == 0
 
-  - name: Get specific Grafana pod names
-    ansible.builtin.command: >
-      kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
-      -o name
-    register: specific_grafana_pods
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-  - name: Force delete specific Grafana pods by name
-    ansible.builtin.command: >
-      kubectl delete {{ item }} -n {{ grafana_namespace }} --force --grace-period=0
-    loop: '{{ specific_grafana_pods.stdout_lines }}'
-    register: specific_pod_delete
-    changed_when: specific_pod_delete.rc == 0
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-    when: specific_grafana_pods.stdout_lines | length > 0
+    - name: Get specific Grafana pod names
+      ansible.builtin.command: >
+        kubectl get pods -n {{ grafana_namespace }} -l app.kubernetes.io/name=grafana
+        -o name
+      register: specific_grafana_pods
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+    - name: Force delete specific Grafana pods by name
+      ansible.builtin.command: >
+        kubectl \
+          delete {{ item }} -n {{ grafana_namespace }} --force --grace-period=0
+      loop: "{{ specific_grafana_pods.stdout_lines }}"
+      register: specific_pod_delete
+      changed_when: specific_pod_delete.rc == 0
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+      when: specific_grafana_pods.stdout_lines | length > 0
 
-  - name: Wait for all resources to be deleted
-    ansible.builtin.pause:
-      seconds: 30
-    when: >
-      deployment_delete.changed or  statefulset_delete.changed or  service_delete.changed
-      or  configmap_delete.changed or  secret_delete.changed or  ingress_delete.changed
-      or  pvc_delete.changed or  (pod_delete is defined and pod_delete.changed)
+    - name: Wait for all resources to be deleted
+      ansible.builtin.pause:
+        seconds: 30
+      when: >
+        deployment_delete.changed or  statefulset_delete.changed or  service_delete.changed
+        or  configmap_delete.changed or  secret_delete.changed or  ingress_delete.changed
+        or  pvc_delete.changed or  (pod_delete is defined and pod_delete.changed)
 
-  - name: Check for any remaining Grafana resources
-    ansible.builtin.command: >
-      kubectl get all -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
-      grafana_release_name }}" -o name
-    register: remaining_resources
-    changed_when: false
-    failed_when: false
-    environment: '{{ kubeconfig_env }}'
-  - name: Report cleanup status
-    ansible.builtin.debug:
-      msg:
-      - Grafana cleanup completed
-      - "Helm uninstall: {{ 'Success' if helm_uninstall is defined and helm_uninstall.changed
-        else 'Not applicable' }}"
-      - "Remaining resources: {{ 'None' if not remaining_resources.stdout_lines else
-        remaining_resources.stdout_lines | join(', ') }}"
+    - name: Check for any remaining Grafana resources
+      ansible.builtin.command: >
+        kubectl get all -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{
+        grafana_release_name }}" -o name
+      register: remaining_resources
+      changed_when: false
+      failed_when: false
+      environment: "{{ kubeconfig_env }}"
+    - name: Report cleanup status
+      ansible.builtin.ansible.builtin.debug:
+        msg:
+          - Grafana cleanup completed
+          - "Helm uninstall: {{ 'Success' if helm_uninstall is defined and helm_uninstall.changed
+            else 'Not applicable' }}"
+          - "Remaining resources: {{ 'None' if not remaining_resources.stdout_lines else
+            remaining_resources.stdout_lines | join(', ') }}"

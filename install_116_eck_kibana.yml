@@ -12,7 +12,7 @@
 
   tasks:
     - name: Verify Elasticsearch is available
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get elasticsearch elasticsearch -o jsonpath='{.status.health}' 2>/dev/null || echo "Not Ready"
       register: es_health
@@ -24,16 +24,19 @@
       changed_when: false
 
     - name: Delete existing Kibana ECK deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete kibana kibana --wait=false
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          delete kibana kibana --wait=false
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       ignore_errors: true
 
     - name: Delete existing Kibana manual deployment
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete deployment kibana --wait=false
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} delete service kibana --wait=false
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          delete deployment kibana --wait=false
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          delete service kibana --wait=false
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           delete service kibana-nodeport --wait=false
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
@@ -43,7 +46,7 @@
       ignore_errors: true
 
     - name: Wait for Kibana ECK to be deleted
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get kibana kibana 2>/dev/null || echo "Kibana deleted"
       register: kibana_deleted
@@ -55,7 +58,7 @@
       ignore_errors: true
 
     - name: Get elastic user password
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
       register: elastic_password
@@ -65,7 +68,7 @@
       no_log: true
 
     - name: Get kibana_system password from secret
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get secret kibana-credentials -o jsonpath='{.data.kibana-password}' | base64 -d
       register: kibana_password_from_secret
@@ -92,7 +95,7 @@
       become: false
 
     - name: Wait for ES pod for exec commands
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
             -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
@@ -104,17 +107,18 @@
       become: false
 
     - name: Create kibana_system user in Elasticsearch - Check if exists
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-          exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
-            "https://localhost:9200/_security/user/kibana_system" | grep -q "kibana_system" || echo "not_found"
+          exec {{ es_pod_name.stdout }} -- \
+            curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+              "https://localhost:9200/_security/user/kibana_system" | grep -q "kibana_system" || echo "not_found"
       register: kibana_user_exists
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       ignore_errors: true
 
     - name: Update kibana_system user password if exists
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           exec {{ es_pod_name.stdout }} -- \
           curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
@@ -128,7 +132,7 @@
       ignore_errors: true
 
     - name: Create kibana_system user if not exists
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           exec {{ es_pod_name.stdout }} -- \
           curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
@@ -142,7 +146,7 @@
       ignore_errors: true
 
     - name: Test kibana_system user authentication
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           exec {{ es_pod_name.stdout }} -- \
           curl -s -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" \
@@ -153,18 +157,20 @@
       ignore_errors: true
 
     - name: Verify kibana_system role exists
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- \
-          curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
-            "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          exec {{ es_pod_name.stdout }} -- \
+            curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+              "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
       register: kibana_role_check
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       ignore_errors: true
 
     - name: Create kibana_system role if missing
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- \
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          exec {{ es_pod_name.stdout }} -- \
           curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
             -X POST "https://localhost:9200/_security/role/kibana_system" -H "Content-Type: application/json" -d '{
               "cluster": ["monitor", "manage_index_templates", "manage_ilm", "manage", "manage_own_api_key"],
@@ -194,15 +200,17 @@
       when: "'kibana_system' not in kibana_role_check.stdout"
 
     - name: Delete and recreate kibana_system user with proper roles
-      shell: |
+      ansible.builtin.shell: |
         # Delete user first
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- \
-          curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
-            -X DELETE "https://localhost:9200/_security/user/kibana_system" || echo "User deletion failed"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          exec {{ es_pod_name.stdout }} -- \
+            curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+              -X DELETE "https://localhost:9200/_security/user/kibana_system" || echo "User deletion failed"
 
         # Create user with proper roles
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-          exec {{ es_pod_name.stdout }} -- curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+          exec {{ es_pod_name.stdout }} -- \
+            curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
             -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{
               "password": "{{ kibana_password_from_secret.stdout }}",
               "roles": ["kibana_system"],
@@ -218,17 +226,18 @@
       ignore_errors: true
 
     - name: Test kibana_system user authentication again
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} exec {{ es_pod_name.stdout }} -- \
-          curl -sv -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" \
-            "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          exec {{ es_pod_name.stdout }} -- \
+            curl -sv -k -u "kibana_system:{{ kibana_password_from_secret.stdout }}" \
+              "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
       register: kibana_auth_test_again
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       ignore_errors: true
 
     - name: Get Elasticsearch CA certificate
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get secret elasticsearch-es-http-ca-internal -o jsonpath='{.data.ca\.crt}' \
           | base64 -d > /tmp/elasticsearch-ca.crt
@@ -288,7 +297,7 @@
       become: false
 
     - name: Create self-signed certificate for Kibana
-      shell: |
+      ansible.builtin.shell: |
         mkdir -p /tmp/kibana-certs
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
           -keyout /tmp/kibana-certs/tls.key \
@@ -600,7 +609,7 @@
       become: false
 
     - name: Wait for Kibana deployment to start
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} rollout status deployment/kibana
       register: rollout_status
       delegate_to: "{{ groups['utility'][0] }}"
@@ -608,7 +617,7 @@
       ignore_errors: true
 
     - name: Get Kibana pod name
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get pods -l app=kibana -o jsonpath='{.items[0].metadata.name}'
       register: kibana_pod_name
@@ -617,7 +626,7 @@
       ignore_errors: true
 
     - name: Check Kibana pod logs
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           logs {{ kibana_pod_name.stdout }} || echo "No logs available yet"
       register: kibana_logs
@@ -626,7 +635,7 @@
       ignore_errors: true
 
     - name: Display installation information
-      debug:
+      ansible.builtin.debug:
         msg:
           - Kibana has been deployed manually without using ECK!
           - "--------------------------------------"

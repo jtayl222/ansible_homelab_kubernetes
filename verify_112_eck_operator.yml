@@ -2,82 +2,87 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     operator_namespace: elastic-system
 
   tasks:
-  - name: Verify ECK operator namespace exists
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ operator_namespace }} -o name
-    register: operator_namespace_exists
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    changed_when: false
+    - name: Verify ECK operator namespace exists
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get namespace {{ operator_namespace }} -o name
+      register: operator_namespace_exists
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      changed_when: false
 
-  - name: Verify ECK operator deployment exists
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} get statefulset elastic-operator -o name
-    register: operator_exists
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    changed_when: false
+    - name: Verify ECK operator deployment exists
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} \
+          get statefulset elastic-operator -o name
+      register: operator_exists
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      changed_when: false
 
-  - name: Verify ECK operator is running
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} get pods -l control-plane=elastic-operator -o jsonpath='{.items[0].status.phase}'
-    register: operator_running
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    changed_when: false
+    - name: Verify ECK operator is running
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} \
+          get pods -l control-plane=elastic-operator -o jsonpath='{.items[0].status.phase}'
+      register: operator_running
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      changed_when: false
 
-  - name: Check ECK operator logs for errors
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} logs -l control-plane=elastic-operator --tail=20 | grep -i error || echo "No errors found in recent logs"
-    register: operator_logs
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    changed_when: false
+    - name: Check ECK operator logs for errors
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} logs -l control-plane=elastic-operator --tail=20 | grep -i error || echo "No errors found in recent logs"
+      register: operator_logs
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      changed_when: false
 
-  - name: Verify Custom Resource Definitions are installed
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep elastic.co | wc -l
-    register: crd_count
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    changed_when: false
+    - name: Verify Custom Resource Definitions are installed
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get crd | grep elastic.co | wc -l
+      register: crd_count
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      changed_when: false
 
-  - name: Display ECK operator verification results
-    debug:
-      msg:
-      - 'ECK Operator Verification Results:'
-      - '--------------------------------------'
-      - "Operator namespace exists: {{ 'Yes' if operator_namespace_exists.rc == 0
-        else 'No' }}"
-      - "Operator deployment exists: {{ 'Yes' if operator_exists.rc == 0 else 'No'
-        }}"
-      - "Operator pod status: {{ operator_running.stdout if operator_running.rc ==
-        0 else 'Not running' }}"
-      - "Number of Elastic CRDs installed: {{ crd_count.stdout if crd_count.rc ==
-        0 else '0' }}"
-      - "Recent log entries: {{ operator_logs.stdout_lines | default(['Could not retrieve
-        logs']) }}"
-      - '--------------------------------------'
-      - "Overall status: {{ 'HEALTHY' if operator_namespace_exists.rc == 0 and operator_exists.rc
-        == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
-        else 'ISSUES DETECTED' }}"
+    - name: Display ECK operator verification results
+      ansible.builtin.debug:
+        msg:
+          - "ECK Operator Verification Results:"
+          - "--------------------------------------"
+          - "Operator namespace exists: {{ 'Yes' if operator_namespace_exists.rc == 0
+            else 'No' }}"
+          - "Operator deployment exists: {{ 'Yes' if operator_exists.rc == 0 else 'No'
+            }}"
+          - "Operator pod status: {{ operator_running.stdout if operator_running.rc ==
+            0 else 'Not running' }}"
+          - "Number of Elastic CRDs installed: {{ crd_count.stdout if crd_count.rc ==
+            0 else '0' }}"
+          - "Recent log entries: {{ operator_logs.stdout_lines | default(['Could not retrieve
+            logs']) }}"
+          - "--------------------------------------"
+          - "Overall status: {{ 'HEALTHY' if operator_namespace_exists.rc == 0 and operator_exists.rc
+            == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
+            else 'ISSUES DETECTED' }}"
 
-  - name: Set verification status
-    set_fact:
-      operator_healthy: "{{ operator_namespace_exists.rc == 0 and operator_exists.rc
-        == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
-        }}"
+    - name: Set verification status
+      set_fact:
+        operator_healthy:
+          "{{ operator_namespace_exists.rc == 0 and operator_exists.rc
+          == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
+          }}"
 
-  - name: Fail if operator is not healthy
-    fail:
-      msg: ECK Operator verification failed. See output above for details.
-    when: not operator_healthy
+    - name: Fail if operator is not healthy
+      fail:
+        msg: ECK Operator verification failed. See output above for details.
+      when: not operator_healthy

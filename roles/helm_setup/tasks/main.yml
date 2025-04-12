@@ -1,9 +1,9 @@
 - name: Ensure required packages are installed
   ansible.builtin.package:
     name:
-    - curl
-    - apt-transport-https
-    - ca-certificates
+      - curl
+      - apt-transport-https
+      - ca-certificates
     state: present
   when: ansible_os_family == "Debian"
 
@@ -30,15 +30,15 @@
   ansible.builtin.file:
     path: ~/.kube
     state: directory
-    mode: '0700'
+    mode: "0700"
 
 - name: Copy kubeconfig from k3s
   ansible.builtin.copy:
     src: /etc/rancher/k3s/k3s.yaml
     dest: ~/.kube/config
     remote_src: yes
-    mode: '0600'
-  become: yes
+    mode: "0600"
+  become: true
 
 - name: Add stable Helm repository
   ansible.builtin.command: helm repo add stable https://charts.helm.sh/stable
@@ -69,6 +69,6 @@
     api_version: v1
     kind: Namespace
     state: present
-  become: yes
+  become: true
   environment:
     KUBECONFIG: /

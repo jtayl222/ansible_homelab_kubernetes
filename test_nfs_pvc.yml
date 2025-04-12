@@ -2,70 +2,71 @@
   hosts: localhost
   gather_facts: false
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
-    k8s_namespace: default  # Changed from 'namespace' to 'k8s_namespace'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    k8s_namespace: default # Changed from 'namespace' to 'k8s_namespace'
     storage_class: nfs-client
   tasks:
-  - name: Create test PVC manifest
-    copy:
-      content: |
-        apiVersion: v1
-        kind: PersistentVolumeClaim
-        metadata:
-          name: test-nfs-pvc
-          namespace: {{ k8s_namespace }}
-        spec:
-          accessModes:
-            - ReadWriteMany
-          storageClassName: {{ storage_class }}
-          resources:
-            requests:
-              storage: 1Gi
-      dest: '{{ playbook_dir }}/fetched_tokens/test-pvc.yaml'
+    - name: Create test PVC manifest
+      ansible.builtin.copy:
+        content: |
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: test-nfs-pvc
+            namespace: {{ k8s_namespace }}
+          spec:
+            accessModes:
+              - ReadWriteMany
+            storageClassName: {{ storage_class }}
+            resources:
+              requests:
+                storage: 1Gi
+        dest: "{{ playbook_dir }}/fetched_tokens/test-pvc.yaml"
 
-  - name: Apply test PVC
-    command: kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/test-pvc.yaml
-    register: pvc_create
+    - name: Apply test PVC
+      command: kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/test-pvc.yaml
+      register: pvc_create
 
-  - name: Create test pod manifest
-    copy:
-      content: |
-        apiVersion: v1
-        kind: Pod
-        metadata:
-          name: test-nfs-pod
-          namespace: {{ k8s_namespace }}
-        spec:
-          containers:
-          - name: test-container
-            image: busybox
-            command: ["/bin/sh", "-c", "while true; do echo 'NFS test' > /data/test-file-$(date +%s).txt; sleep 30; done"]
-            volumeMounts:
+    - name: Create test pod manifest
+      ansible.builtin.copy:
+        content: |
+          apiVersion: v1
+          kind: Pod
+          metadata:
+            name: test-nfs-pod
+            namespace: {{ k8s_namespace }}
+          spec:
+            containers:
+            - name: test-container
+              image: busybox
+              command: ["/bin/sh", "-c", "while true; do echo 'NFS test' > /data/test-file-$(date +%s).txt; sleep 30; done"]
+              volumeMounts:
+              - name: test-volume
+                mountPath: /data
+            volumes:
             - name: test-volume
-              mountPath: /data
-          volumes:
-          - name: test-volume
-            persistentVolumeClaim:
-              claimName: test-nfs-pvc
-      dest: '{{ playbook_dir }}/fetched_tokens/test-pod.yaml'
-  - name: Apply test pod
-    command: kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/test-pod.yaml
-    register: pod_create
+              persistentVolumeClaim:
+                claimName: test-nfs-pvc
+        dest: "{{ playbook_dir }}/fetched_tokens/test-pod.yaml"
+    - name: Apply test pod
+      command: kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/test-pod.yaml
+      register: pod_create
 
-  - name: Wait for pod to be running
-    command: kubectl --kubeconfig={{ kubeconfig_path }} get pod test-nfs-pod -n {{
-      k8s_namespace }} -o jsonpath='{.status.phase}'
-    register: pod_status
-    until: pod_status.stdout == "Running"
-    retries: 10
-    delay: 5
+    - name: Wait for pod to be running
+      command:
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get pod test-nfs-pod -n {{ k8s_namespace }} -o jsonpath='{.status.phase}'
+      register: pod_status
+      until: pod_status.stdout == "Running"
+      retries: 10
+      delay: 5
 
-  - name: Check NFS directory content
-    command: ls -la /srv/nfs/kubernetes
-    register: nfs_content
-    delegate_to: user-U850
-    become: true
+    - name: Check NFS directory content
+      command: ls -la /srv/nfs/kubernetes
+      register: nfs_content
+      delegate_to: user-U850
+      become: true
 
-  - name: Show NFS directory content
-    debug:
-      var: nfs_content.stdout_lines
+    - name: Show NFS directory content
+      ansible.builtin.debug:
+        var: nfs_content.stdout_lines

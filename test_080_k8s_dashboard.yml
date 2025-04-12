@@ -3,150 +3,153 @@
   gather_facts: false
   vars:
     dashboard_url: http://dashboard.192.168.1.85.nip.io
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     dashboard_namespace: kubernetes-dashboard
     dashboard_sa: dashboard-admin
 
   tasks:
-  - name: Ensure kubeconfig directory exists
-    file:
-      path: '{{ playbook_dir }}/fetched_tokens'
-      state: directory
-      mode: '0755'
+    - name: Ensure kubeconfig directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: "0755"
 
-  - name: Check if kubeconfig exists locally
-    stat:
-      path: '{{ kubeconfig_path }}'
-    register: kubeconfig_stat
+    - name: Check if kubeconfig exists locally
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
 
-  - name: Fetch kubeconfig if not exists
-    block:
-    - name: Fetch kubeconfig from control plane
-      ansible.builtin.fetch:
-        src: /etc/rancher/k3s/k3s.yaml
-        dest: '{{ kubeconfig_path }}'
-        flat: yes
-      delegate_to: "{{ groups['k3s_control_plane'][0] }}"
-    - name: Update kubeconfig server address
-      ansible.builtin.replace:
-        path: '{{ kubeconfig_path }}'
-        regexp: https://127.0.0.1:6443
-        replace: https://192.168.1.85:6443
-    when: not kubeconfig_stat.stat.exists
+    - name: Fetch kubeconfig if not exists
+      block:
+        - name: Fetch kubeconfig from control plane
+          ansible.builtin.fetch:
+            src: /etc/rancher/k3s/k3s.yaml
+            dest: "{{ kubeconfig_path }}"
+            flat: yes
+          delegate_to: "{{ groups['k3s_control_plane'][0] }}"
+        - name: Update kubeconfig server address
+          ansible.builtin.replace:
+            path: "{{ kubeconfig_path }}"
+            regexp: https://127.0.0.1:6443
+            replace: https://192.168.1.85:6443
+      when: not kubeconfig_stat.stat.exists
 
-  - name: Create dashboard service account if it doesn't exist
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: present
-      definition:
-        apiVersion: v1
-        kind: ServiceAccount
-        metadata:
-          name: '{{ dashboard_sa }}'
-          namespace: '{{ dashboard_namespace }}'
-    ignore_errors: true
+    - name: Create dashboard service account if it doesn't exist
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: "{{ dashboard_sa }}"
+            namespace: "{{ dashboard_namespace }}"
+      ignore_errors: true
 
-  - name: Create cluster role binding if it doesn't exist
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: present
-      definition:
-        apiVersion: rbac.authorization.k8s.io/v1
-        kind: ClusterRoleBinding
-        metadata:
-          name: '{{ dashboard_sa }}'
-        roleRef:
-          apiGroup: rbac.authorization.k8s.io
-          kind: ClusterRole
-          name: cluster-admin
-        subjects:
-        - kind: ServiceAccount
-          name: '{{ dashboard_sa }}'
-          namespace: '{{ dashboard_namespace }}'
-    ignore_errors: true
+    - name: Create cluster role binding if it doesn't exist
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ dashboard_sa }}"
+          roleRef:
+            apiGroup: rbac.authorization.k8s.io
+            kind: ClusterRole
+            name: cluster-admin
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ dashboard_sa }}"
+              namespace: "{{ dashboard_namespace }}"
+      ignore_errors: true
 
-  - name: Get service account token name (for K8s ≥ v1.24)
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} create token {{ dashboard_sa }} -n
-      {{ dashboard_namespace }} --duration=24h
-    register: dashboard_token_v124
-    ignore_errors: true
+    - name: Get service account token name (for K8s ≥ v1.24)
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} create token {{ dashboard_sa }} -n
+        {{ dashboard_namespace }} --duration=24h
+      register: dashboard_token_v124
+      ignore_errors: true
 
-  - name: Get service account token name (for K8s < v1.24)
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get secret -n {{ dashboard_namespace
-      }}  -o jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='{{
-      dashboard_sa }}')].metadata.name}"
-    register: token_name
-    ignore_errors: true
-    when: dashboard_token_v124.failed
+    - name: Get service account token name (for K8s < v1.24)
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get secret -n {{ dashboard_namespace
+        }}  -o jsonpath="{.items[?(@.metadata.annotations['kubernetes\.io/service-account\.name']=='{{
+        dashboard_sa }}')].metadata.name}"
+      register: token_name
+      ignore_errors: true
+      when: dashboard_token_v124.failed
 
-  - name: Get token from secret (for K8s < v1.24)
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get secret {{ token_name.stdout }}
-      -n {{ dashboard_namespace }}
-      -o jsonpath="{.data.token}" | base64 --decode
-    register: dashboard_token_old
-    when:
-    - dashboard_token_v124.failed
-    - token_name.stdout != ""
-    ignore_errors: true
+    - name: Get token from secret (for K8s < v1.24)
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get secret {{ token_name.stdout }}
+          -n {{ dashboard_namespace }}
+          -o jsonpath="{.data.token}" | base64 --decode
+      register: dashboard_token_old
+      when:
+        - dashboard_token_v124.failed
+        - token_name.stdout != ""
+      ignore_errors: true
 
-  - name: Set dashboard token fact
-    set_fact:
-      dashboard_token: "{{ dashboard_token_v124.stdout if not dashboard_token_v124.failed
-        else (dashboard_token_old.stdout | default('Token not available')) }}"
+    - name: Set dashboard token fact
+      set_fact:
+        dashboard_token:
+          "{{ dashboard_token_v124.stdout if not dashboard_token_v124.failed
+          else (dashboard_token_old.stdout | default('Token not available')) }}"
 
-  - name: Create dashboard access script
-    copy:
-      dest: '{{ playbook_dir }}/generated/access_dashboard.sh'
-      mode: '0755'
-      content: |
-        #!/bin/bash
+    - name: Create dashboard access script
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/generated/access_dashboard.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
 
-        DASHBOARD_URL="{{ dashboard_url }}"
-        TOKEN="{{ dashboard_token }}"
+          DASHBOARD_URL="{{ dashboard_url }}"
+          TOKEN="{{ dashboard_token }}"
 
-        echo "===== Kubernetes Dashboard Access ====="
-        echo "Dashboard URL: ${DASHBOARD_URL}"
-        echo
-        echo "To access the dashboard, use the following token:"
-        echo
-        echo "${TOKEN}"
-        echo
-        echo "Copy this token to use when prompted by the login screen."
-        echo "======================================="
+          echo "===== Kubernetes Dashboard Access ====="
+          echo "Dashboard URL: ${DASHBOARD_URL}"
+          echo
+          echo "To access the dashboard, use the following token:"
+          echo
+          echo "${TOKEN}"
+          echo
+          echo "Copy this token to use when prompted by the login screen."
+          echo "======================================="
 
-        # Check if the dashboard is accessible
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${DASHBOARD_URL})
+          # Check if the dashboard is accessible
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" ${DASHBOARD_URL})
 
-        if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "302" ]; then
-            echo "Dashboard is accessible (HTTP ${HTTP_CODE})."
-            echo "Opening dashboard in your browser..."
+          if [ "$HTTP_CODE" == "200" ] || [ "$HTTP_CODE" == "302" ]; then
+              echo "Dashboard is accessible (HTTP ${HTTP_CODE})."
+              echo "Opening dashboard in your browser..."
 
-            # Try different methods to open browser based on OS
-            if command -v xdg-open &> /dev/null; then
-                xdg-open "${DASHBOARD_URL}" &
-            elif command -v open &> /dev/null; then
-                open "${DASHBOARD_URL}" &
-            else
-                echo "Could not open browser automatically."
-                echo "Please navigate to ${DASHBOARD_URL} manually."
-            fi
-        else
-            echo "Dashboard appears to be unavailable (HTTP ${HTTP_CODE})."
-            echo "Please check your configuration and try again."
-            echo "You can manually access it at: ${DASHBOARD_URL}"
-        fi
+              # Try different methods to open browser based on OS
+              if command -v xdg-open &> /dev/null; then
+                  xdg-open "${DASHBOARD_URL}" &
+              elif command -v open &> /dev/null; then
+                  open "${DASHBOARD_URL}" &
+              else
+                  echo "Could not open browser automatically."
+                  echo "Please navigate to ${DASHBOARD_URL} manually."
+              fi
+          else
+              echo "Dashboard appears to be unavailable (HTTP ${HTTP_CODE})."
+              echo "Please check your configuration and try again."
+              echo "You can manually access it at: ${DASHBOARD_URL}"
+          fi
 
-  - name: Display access information
-    debug:
-      msg:
-      - =======================================================
-      - Kubernetes Dashboard has been deployed successfully!
-      - =======================================================
-      - 'Dashboard URL: {{ dashboard_url }}'
-      - 'Access Token: {{ dashboard_token }}'
-      - ''
-      - 'You can also use the access script: ./generated/access_dashboard.sh'
-      - =======================================================
+    - name: Display access information
+      ansible.builtin.debug:
+        msg:
+          - =======================================================
+          - Kubernetes Dashboard has been deployed successfully!
+          - =======================================================
+          - "Dashboard URL: {{ dashboard_url }}"
+          - "Access Token: {{ dashboard_token }}"
+          - ""
+          - "You can also use the access script: ./generated/access_dashboard.sh"
+          - =======================================================

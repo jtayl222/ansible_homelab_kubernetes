@@ -32,21 +32,22 @@
 
       # Check if MLflow is already installed
     - name: Check if MLflow is already deployed
-      shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ mlflow_namespace }} \
-        -o name 2>/dev/null || echo "not found"
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get namespace {{ mlflow_namespace }} \
+          -o name 2>/dev/null || echo "not found"
       register: mlflow_ns_check
       become: false
       changed_when: false
 
     - name: Display MLflow installation status
-      debug:
+      ansible.builtin.debug:
         msg: "MLflow namespace: {{ 'Already exists' if 'not found' not in mlflow_ns_check.stdout
           else 'Will be created' }}"
 
       # Clean up any failed deployment first
     - name: Check if previous failed deployment exists
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         get deployment mlflow -o name 2>/dev/null || echo "not found"
       register: mlflow_deployment_check
@@ -56,7 +57,7 @@
       when: "'not found' not in mlflow_ns_check.stdout"
 
     - name: Clean up previous failed deployment if exists
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         delete deployment mlflow 2>/dev/null || echo "not found"
       become: false
@@ -93,7 +94,7 @@
               prefixes:
                 - /mlflow
       delegate_to: "{{ groups['utility'][0] }}"
-      become: no
+      become: false
 
       # Create PVC for MLflow artifacts
     - name: Create PVC for MLflow artifacts
@@ -285,7 +286,7 @@
               prefixes:
                 - /mlflow
       delegate_to: "{{ groups['utility'][0] }}"
-      become: no
+      become: false
 
     - name: Create headers middleware
       kubernetes.core.k8s:
@@ -384,7 +385,7 @@
 
       # Generate TLS certificates for secure access if enabled
     - name: Create directory for certificates
-      file:
+      ansible.builtin.file:
         path: /tmp/mlflow-certs
         state: directory
         mode: '0755'
@@ -392,7 +393,7 @@
       when: enable_tls
 
     - name: Generate self-signed certificate for MLflow
-      shell: |
+      ansible.builtin.shell: |
         openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
           -keyout {{ tls_key_file }} -out {{ tls_cert_file }} \
           -subj "/CN={{ mlflow_host }}/O=MLflow K3s"
@@ -402,7 +403,7 @@
       when: enable_tls
 
     - name: Create TLS secret for MLflow
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} create secret tls mlflow-tls \
           --key {{ tls_key_file }} --cert {{ tls_cert_file }} --dry-run=client -o yaml | \
           kubectl --kubeconfig={{ kubeconfig_path }} apply -f -
@@ -433,7 +434,7 @@
 
       # Wait for deployment to be ready
     - name: Wait for MLflow deployment to be ready
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         rollout status deployment mlflow --timeout=180s
       register: mlflow_rollout
@@ -442,7 +443,7 @@
 
       # Check logs to ensure everything is working
     - name: Check MLflow pod logs
-      shell: |
+      ansible.builtin.shell: |
         POD_NAME=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         get pods -l app=mlflow -o jsonpath='{.items[0].metadata.name}')
         if [ -n "$POD_NAME" ]; then
@@ -456,11 +457,11 @@
       ignore_errors: true
 
     - name: Display MLflow pod logs
-      debug:
+      ansible.builtin.debug:
         msg: '{{ mlflow_logs.stdout_lines }}'
 
     - name: Verify MLflow pod is running
-      shell: |
+      ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         get pods -l app=mlflow -o jsonpath='{.items[0].status.phase}'
       register: mlflow_pod_status
@@ -472,7 +473,7 @@
 
       # Test access methods
     - name: Test MLflow path-based access
-      shell: |
+      ansible.builtin.shell: |
         curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}/mlflow/
       register: mlflow_path_access
       become: false
@@ -480,7 +481,7 @@
       ignore_errors: true
 
     - name: Test MLflow host-based access
-      shell: |
+      ansible.builtin.shell: |
         curl -s -o /dev/null -w "%{http_code}" -H "Host: {{ mlflow_host }}" http://{{ control_plane_ip }}/
       register: mlflow_host_access
       become: false
@@ -488,7 +489,7 @@
       ignore_errors: true
 
     - name: Test MLflow direct NodePort access
-      shell: |
+      ansible.builtin.shell: |
         curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
       register: mlflow_nodeport_access
       become: false
@@ -497,7 +498,7 @@
 
       # Make a test file to verify persistence
     - name: Create test file to verify persistence
-      shell: |
+      ansible.builtin.shell: |
         POD_NAME=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         get pods -l app=mlflow -o jsonpath='{.items[0].metadata.name}')
         if [ -n "$POD_NAME" ]; then
@@ -513,7 +514,7 @@
 
       # Display access status
     - name: Display access test results
-      debug:
+      ansible.builtin.debug:
         msg:
           - 'Access test results:'
           - "- Path-based access (/mlflow/): {{ mlflow_path_access.stdout if mlflow_path_access.rc
@@ -528,7 +529,7 @@
 
       # Display installation summary
     - name: Display MLflow installation summary
-      debug:
+      ansible.builtin.debug:
         msg:
           - ==================== MLFLOW INSTALLATION SUMMARY ====================
           - MLflow has been successfully deployed.

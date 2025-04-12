@@ -62,7 +62,8 @@ curl -s -I http://minio.local/ | head -1 || echo "MinIO check failed"
 # 10. Verify Seldon (assuming seldon.local and an example iris-model)
 echo
 echo "[CHECK] Seldon Iris Model Predictions"
-curl -s -X POST "http://seldon.local/seldon/seldon-system/iris-model/api/v1.0/predictions" \
+curl -s \
+-X POST "http://seldon.local/seldon/seldon-system/iris-model/api/v1.0/predictions" \
      -H "Content-Type: application/json" \
      -d '{"data": {"ndarray": [[5.1, 3.5, 1.4, 0.2]]}}' \
      | head -c 200 || echo "Seldon Iris model check failed"

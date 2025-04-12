@@ -5,281 +5,287 @@
   vars:
     k3s_control_ip: "{{ hostvars[groups['k3s_control_plane'][0]].ansible_host }}"
     dashboard_subdomain: traefik
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     traefik_namespace: kube-system
     test_app_namespace: traefik-test
     test_app_hostname: test-app.{{ k3s_control_ip }}.nip.io
   tasks:
-  - name: Ensure kubeconfig exists
-    stat:
-      path: '{{ kubeconfig_path }}'
-    register: kubeconfig_stat
+    - name: Ensure kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
 
-  - name: Fail if kubeconfig doesn't exist
-    fail:
-      msg: Kubeconfig not found at {{ kubeconfig_path }}. Please run install_070_traefik.yml
-        first.
-    when: not kubeconfig_stat.stat.exists
+    - name: Fail if kubeconfig doesn't exist
+      fail:
+        msg:
+          Kubeconfig not found at {{ kubeconfig_path }}. Please run install_070_traefik.yml
+          first.
+      when: not kubeconfig_stat.stat.exists
 
-  - name: Check if Traefik pods are running
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get pods -n {{ traefik_namespace
-      }} -l app.kubernetes.io/name=traefik -o jsonpath='{.items[*].status.phase}'
-    register: traefik_pods_status
-    failed_when: "'Running' not in traefik_pods_status.stdout"
-  - name: Get Traefik details
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get deployment traefik -n {{ traefik_namespace
-      }} -o jsonpath='{.spec.template.spec.containers[0].args}'
-    register: traefik_args
+    - name: Check if Traefik pods are running
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get pods -n {{ traefik_namespace }} -l app.kubernetes.io/name=traefik
+          -o jsonpath='{.items[*].status.phase}'
+      register: traefik_pods_status
+      failed_when: "'Running' not in traefik_pods_status.stdout"
+    - name: Get Traefik details
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get deployment traefik -n {{ traefik_namespace }}
+          -o jsonpath='{.spec.template.spec.containers[0].args}'
+      register: traefik_args
 
-  - name: Check if Traefik dashboard is enabled in arguments
-    debug:
-      msg: Traefik dashboard is enabled in deployment args
-    when: "'--api.dashboard=true' in traefik_args.stdout"
-  - name: Get Traefik service NodePort
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get svc traefik -n {{ traefik_namespace
-      }} -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
-    register: traefik_port
+    - name: Check if Traefik dashboard is enabled in arguments
+      ansible.builtin.debug:
+        msg: Traefik dashboard is enabled in deployment args
+      when: "'--api.dashboard=true' in traefik_args.stdout"
+    - name: Get Traefik service NodePort
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get svc traefik -n {{ traefik_namespace }}
+          -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+      register: traefik_port
 
-  - name: Get Traefik pod name
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get pods -n {{ traefik_namespace
-      }} -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].metadata.name}'
-    register: traefik_pod
+    - name: Get Traefik pod name
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get pods -n {{ traefik_namespace}}
+          -l app.kubernetes.io/name=traefik -o jsonpath='{.items[0].metadata.name}'
+      register: traefik_pod
 
-  - name: Check Traefik logs for errors
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} logs {{ traefik_pod.stdout }} -n
-      {{ traefik_namespace }} | grep -i error | wc -l
-    register: traefik_errors
+    - name: Check Traefik logs for errors
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} logs {{ traefik_pod.stdout }} -n
+        {{ traefik_namespace }} | grep -i error | wc -l
+      register: traefik_errors
 
-  - name: Check if dashboard IngressRoute exists
-    shell: >
-      kubectl --kubeconfig={{ kubeconfig_path }} get ingressroute traefik-dashboard
-      -n {{ traefik_namespace }} -o name || echo "not found"
-    register: dashboard_ingressroute
+    - name: Check if dashboard IngressRoute exists
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get ingressroute traefik-dashboard
+          -n {{ traefik_namespace }} -o name || echo "not found"
+      register: dashboard_ingressroute
 
-  - name: Setup test application to verify Traefik routing
-    block:
-    - name: Create test namespace
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} create namespace {{ test_app_namespace
-        }} --dry-run=client -o yaml |  kubectl --kubeconfig={{ kubeconfig_path }}
-        apply -f -
+    - name: Setup test application to verify Traefik routing
+      block:
+        - name: Create test namespace
+          ansible.builtin.shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} create namespace {{ test_app_namespace
+            }} --dry-run=client -o yaml |  kubectl --kubeconfig={{ kubeconfig_path }}
+            apply -f -
 
-    - name: Deploy test application
-      copy:
-        dest: /tmp/traefik-test-app.yaml
-        content: |
-          apiVersion: apps/v1
-          kind: Deployment
-          metadata:
-            name: traefik-test-app
-            namespace: {{ test_app_namespace }}
-          spec:
-            replicas: 1
-            selector:
-              matchLabels:
-                app: traefik-test-app
-            template:
+        - name: Deploy test application
+          ansible.builtin.copy:
+            dest: /tmp/traefik-test-app.yaml
+            content: |
+              apiVersion: apps/v1
+              kind: Deployment
               metadata:
-                labels:
-                  app: traefik-test-app
+                name: traefik-test-app
+                namespace: {{ test_app_namespace }}
               spec:
-                containers:
-                - name: nginx
-                  image: nginx:stable
-                  ports:
-                  - containerPort: 80
-                  volumeMounts:
-                  - name: nginx-config
-                    mountPath: /usr/share/nginx/html/index.html
-                    subPath: index.html
-                volumes:
-                - name: nginx-config
-                  configMap:
-                    name: traefik-test-content
-          ---
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: traefik-test-content
-            namespace: {{ test_app_namespace }}
-          data:
-            index.html: |
-              <!DOCTYPE html>
-              <html>
-              <head><title>Traefik Test</title></head>
-              <body>
-                <h1>Traefik Test Successful!</h1>
-                <p>If you can see this page, Traefik is correctly routing traffic to this test application.</p>
-              </body>
-              </html>
-          ---
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: traefik-test-app
-            namespace: {{ test_app_namespace }}
-          spec:
-            selector:
-              app: traefik-test-app
-            ports:
-            - port: 80
-              targetPort: 80
-          ---
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: traefik-test-app
-            namespace: {{ test_app_namespace }}
-          spec:
-            entryPoints:
-              - web
-            routes:
-              - match: Host(`{{ test_app_hostname }}`)
-                kind: Rule
-                services:
-                  - name: traefik-test-app
-                    port: 80
+                replicas: 1
+                selector:
+                  matchLabels:
+                    app: traefik-test-app
+                template:
+                  metadata:
+                    labels:
+                      app: traefik-test-app
+                  spec:
+                    containers:
+                    - name: nginx
+                      image: nginx:stable
+                      ports:
+                      - containerPort: 80
+                      volumeMounts:
+                      - name: nginx-config
+                        mountPath: /usr/share/nginx/html/index.html
+                        subPath: index.html
+                    volumes:
+                    - name: nginx-config
+                      configMap:
+                        name: traefik-test-content
+              ---
+              apiVersion: v1
+              kind: ConfigMap
+              metadata:
+                name: traefik-test-content
+                namespace: {{ test_app_namespace }}
+              data:
+                index.html: |
+                  <!DOCTYPE html>
+                  <html>
+                  <head><title>Traefik Test</title></head>
+                  <body>
+                    <h1>Traefik Test Successful!</h1>
+                    <p>If you can see this page, Traefik is correctly routing traffic to this test application.</p>
+                  </body>
+                  </html>
+              ---
+              apiVersion: v1
+              kind: Service
+              metadata:
+                name: traefik-test-app
+                namespace: {{ test_app_namespace }}
+              spec:
+                selector:
+                  app: traefik-test-app
+                ports:
+                - port: 80
+                  targetPort: 80
+              ---
+              apiVersion: traefik.io/v1alpha1
+              kind: IngressRoute
+              metadata:
+                name: traefik-test-app
+                namespace: {{ test_app_namespace }}
+              spec:
+                entryPoints:
+                  - web
+                routes:
+                  - match: Host(`{{ test_app_hostname }}`)
+                    kind: Rule
+                    services:
+                      - name: traefik-test-app
+                        port: 80
 
-    - name: Apply test application
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-test-app.yaml
+        - name: Apply test application
+          ansible.builtin.shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-test-app.yaml
 
-    - name: Wait for test app to be ready
-      shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=available
-        deployment/traefik-test-app -n {{ test_app_namespace }} --timeout=60s
-      register: app_wait_result
-      failed_when: app_wait_result.rc != 0
+        - name: Wait for test app to be ready
+          ansible.builtin.shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=available
+            deployment/traefik-test-app -n {{ test_app_namespace }} --timeout=60s
+          register: app_wait_result
+          failed_when: app_wait_result.rc != 0
 
-  - name: Create comprehensive test script
-    copy:
-      dest: '{{ playbook_dir }}/generated/verify_traefik.sh'
-      mode: '0755'
-      content: |
-        #!/bin/bash
+    - name: Create comprehensive test script
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/generated/verify_traefik.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
 
-        NODE_IP="{{ k3s_control_ip }}"
-        PORT="{{ traefik_port.stdout }}"
-        DASHBOARD_HOST="{{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io"
-        TEST_APP_HOST="{{ test_app_hostname }}"
+          NODE_IP="{{ k3s_control_ip }}"
+          PORT="{{ traefik_port.stdout }}"
+          DASHBOARD_HOST="{{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io"
+          TEST_APP_HOST="{{ test_app_hostname }}"
 
-        # Color definitions
-        GREEN='\033[0;32m'
-        RED='\033[0;31m'
-        YELLOW='\033[1;33m'
-        NC='\033[0m' # No Color
+          # Color definitions
+          GREEN='\033[0;32m'
+          RED='\033[0;31m'
+          YELLOW='\033[1;33m'
+          NC='\033[0m' # No Color
 
-        echo -e "${YELLOW}===============================================${NC}"
-        echo -e "${YELLOW}     Traefik Verification Test Suite${NC}"
-        echo -e "${YELLOW}===============================================${NC}"
-        echo
+          echo -e "${YELLOW}===============================================${NC}"
+          echo -e "${YELLOW}     Traefik Verification Test Suite${NC}"
+          echo -e "${YELLOW}===============================================${NC}"
+          echo
 
-        # Test 1: Check if Traefik is accessible
-        echo -e "Test 1: Checking if Traefik is accessible..."
-        if curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT" | grep -q "2[0-9][0-9]\|404"; then
-          echo -e "${GREEN}✓ Traefik is accessible at http://$NODE_IP:$PORT${NC}"
-        else
-          echo -e "${RED}✗ Traefik is not accessible at http://$NODE_IP:$PORT${NC}"
-        fi
-        echo
+          # Test 1: Check if Traefik is accessible
+          echo -e "Test 1: Checking if Traefik is accessible..."
+          if curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT" | grep -q "2[0-9][0-9]\|404"; then
+            echo -e "${GREEN}✓ Traefik is accessible at http://$NODE_IP:$PORT${NC}"
+          else
+            echo -e "${RED}✗ Traefik is not accessible at http://$NODE_IP:$PORT${NC}"
+          fi
+          echo
 
-        # Test 2: Check Dashboard access
-        echo -e "Test 2: Checking Traefik dashboard..."
-        DASHBOARD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/dashboard/")
-        if [ "$DASHBOARD_STATUS" == "200" ]; then
-          echo -e "${GREEN}✓ Traefik dashboard is accessible at http://$DASHBOARD_HOST:$PORT/dashboard/${NC}"
-        else
-          echo -e "${RED}✗ Traefik dashboard returned HTTP $DASHBOARD_STATUS - not accessible${NC}"
-          echo -e "  Try accessing: http://$DASHBOARD_HOST:$PORT/dashboard/"
-        fi
-        echo
+          # Test 2: Check Dashboard access
+          echo -e "Test 2: Checking Traefik dashboard..."
+          DASHBOARD_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/dashboard/")
+          if [ "$DASHBOARD_STATUS" == "200" ]; then
+            echo -e "${GREEN}✓ Traefik dashboard is accessible at http://$DASHBOARD_HOST:$PORT/dashboard/${NC}"
+          else
+            echo -e "${RED}✗ Traefik dashboard returned HTTP $DASHBOARD_STATUS - not accessible${NC}"
+            echo -e "  Try accessing: http://$DASHBOARD_HOST:$PORT/dashboard/"
+          fi
+          echo
 
-        # Test 3: Check metrics endpoint
-        echo -e "Test 3: Checking Prometheus metrics endpoint..."
-        METRICS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/metrics")
-        if [ "$METRICS_STATUS" == "200" ]; then
-          echo -e "${GREEN}✓ Prometheus metrics endpoint is accessible${NC}"
-        else
-          echo -e "${RED}✗ Prometheus metrics endpoint returned HTTP $METRICS_STATUS - not accessible${NC}"
-        fi
-        echo
+          # Test 3: Check metrics endpoint
+          echo -e "Test 3: Checking Prometheus metrics endpoint..."
+          METRICS_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "http://$NODE_IP:$PORT/metrics")
+          if [ "$METRICS_STATUS" == "200" ]; then
+            echo -e "${GREEN}✓ Prometheus metrics endpoint is accessible${NC}"
+          else
+            echo -e "${RED}✗ Prometheus metrics endpoint returned HTTP $METRICS_STATUS - not accessible${NC}"
+          fi
+          echo
 
-        # Test 4: Check test application routing
-        echo -e "Test 4: Checking routing to test application..."
-        TEST_APP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $TEST_APP_HOST" "http://$NODE_IP:$PORT/")
-        if [ "$TEST_APP_STATUS" == "200" ]; then
-          echo -e "${GREEN}✓ Test application is accessible via Traefik${NC}"
-          echo -e "  Access URL: http://$TEST_APP_HOST:$PORT/"
-        else
-          echo -e "${RED}✗ Test application returned HTTP $TEST_APP_STATUS - routing may not be working${NC}"
-        fi
-        echo
+          # Test 4: Check test application routing
+          echo -e "Test 4: Checking routing to test application..."
+          TEST_APP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $TEST_APP_HOST" "http://$NODE_IP:$PORT/")
+          if [ "$TEST_APP_STATUS" == "200" ]; then
+            echo -e "${GREEN}✓ Test application is accessible via Traefik${NC}"
+            echo -e "  Access URL: http://$TEST_APP_HOST:$PORT/"
+          else
+            echo -e "${RED}✗ Test application returned HTTP $TEST_APP_STATUS - routing may not be working${NC}"
+          fi
+          echo
 
-        # Test 5: Check Traefik API routing
-        echo -e "Test 5: Checking Traefik API access..."
-        API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/api/version")
-        if [ "$API_STATUS" == "200" ]; then
-          echo -e "${GREEN}✓ Traefik API is accessible${NC}"
-          echo -e "  API version: $(curl -s -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/api/version" | sed 's/{"Version":"\(.*\)"}/\1/')"
-        else
-          echo -e "${RED}✗ Traefik API returned HTTP $API_STATUS - not accessible${NC}"
-        fi
-        echo
+          # Test 5: Check Traefik API routing
+          echo -e "Test 5: Checking Traefik API access..."
+          API_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/api/version")
+          if [ "$API_STATUS" == "200" ]; then
+            echo -e "${GREEN}✓ Traefik API is accessible${NC}"
+            echo -e "  API version: $(curl -s -H "Host: $DASHBOARD_HOST" "http://$NODE_IP:$PORT/api/version" | sed 's/{"Version":"\(.*\)"}/\1/')"
+          else
+            echo -e "${RED}✗ Traefik API returned HTTP $API_STATUS - not accessible${NC}"
+          fi
+          echo
 
-        # Summary
-        echo -e "${YELLOW}===============================================${NC}"
-        echo -e "${YELLOW}     Traefik Verification Summary${NC}"
-        echo -e "${YELLOW}===============================================${NC}"
-        echo
-        echo -e "Traefik Service: http://$NODE_IP:$PORT"
-        echo -e "Dashboard URL: http://$DASHBOARD_HOST:$PORT/dashboard/"
-        echo -e "Test App URL: http://$TEST_APP_HOST:$PORT/"
-        echo -e "API URL: http://$DASHBOARD_HOST:$PORT/api/"
-        echo
-        echo -e "${YELLOW}Note:${NC} If using nip.io hostnames, make sure your network can resolve them."
-        echo -e "${YELLOW}Tip:${NC} You can add entries to /etc/hosts for local testing if needed."
-        echo
+          # Summary
+          echo -e "${YELLOW}===============================================${NC}"
+          echo -e "${YELLOW}     Traefik Verification Summary${NC}"
+          echo -e "${YELLOW}===============================================${NC}"
+          echo
+          echo -e "Traefik Service: http://$NODE_IP:$PORT"
+          echo -e "Dashboard URL: http://$DASHBOARD_HOST:$PORT/dashboard/"
+          echo -e "Test App URL: http://$TEST_APP_HOST:$PORT/"
+          echo -e "API URL: http://$DASHBOARD_HOST:$PORT/api/"
+          echo
+          echo -e "${YELLOW}Note:${NC} If using nip.io hostnames, make sure your network can resolve them."
+          echo -e "${YELLOW}Tip:${NC} You can add entries to /etc/hosts for local testing if needed."
+          echo
 
-  - name: Run verification script
-    shell: '{{ playbook_dir }}/generated/verify_traefik.sh'
-    register: verification_result
+    - name: Run verification script
+      ansible.builtin.shell: "{{ playbook_dir }}/generated/verify_traefik.sh"
+      register: verification_result
 
-  - name: Display verification results
-    debug:
-      msg: '{{ verification_result.stdout_lines }}'
-  - name: Create cleanup script for test resources
-    copy:
-      dest: '{{ playbook_dir }}/generated/uninstall_traefik_test.sh'
-      mode: '0755'
-      content: |
-        #!/bin/bash
+    - name: Display verification results
+      ansible.builtin.debug:
+        msg: "{{ verification_result.stdout_lines }}"
+    - name: Create cleanup script for test resources
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/generated/uninstall_traefik_test.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
 
-        KUBECONFIG="{{ kubeconfig_path }}"
-        NAMESPACE="{{ test_app_namespace }}"
+          KUBECONFIG="{{ kubeconfig_path }}"
+          NAMESPACE="{{ test_app_namespace }}"
 
-        echo "Cleaning up Traefik test resources..."
-        kubectl --kubeconfig=$KUBECONFIG delete namespace $NAMESPACE
-        echo "Test resources removed."
+          echo "Cleaning up Traefik test resources..."
+          kubectl --kubeconfig=$KUBECONFIG delete namespace $NAMESPACE
+          echo "Test resources removed."
 
-  - name: Display dashboard access information
-    debug:
-      msg:
-      - =======================================================
-      - Traefik Dashboard Access Information
-      - =======================================================
-      - 'Dashboard URL: http://{{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io:{{
-        traefik_port.stdout }}/dashboard/'
-      - 'Direct URL with Host header: http://{{ k3s_control_ip }}:{{ traefik_port.stdout
-        }}/dashboard/'
-      - '  (use Host: {{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io)'
-      - ''
-      - 'Test application URL: http://{{ test_app_hostname }}:{{ traefik_port.stdout
-        }}/'
-      - ''
-      - 'To clean up test resources: ./generated/uninstall_traefik_test.sh'
-      - =======================================================
+    - name: Display dashboard access information
+      ansible.builtin.debug:
+        msg:
+          - =======================================================
+          - Traefik Dashboard Access Information
+          - =======================================================
+          - "Dashboard URL: http://{{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io:{{
+            traefik_port.stdout }}/dashboard/"
+          - "Direct URL with Host header: http://{{ k3s_control_ip }}:{{ traefik_port.stdout
+            }}/dashboard/"
+          - "  (use Host: {{ dashboard_subdomain }}.{{ k3s_control_ip }}.nip.io)"
+          - ""
+          - "Test application URL: http://{{ test_app_hostname }}:{{ traefik_port.stdout
+            }}/"
+          - ""
+          - "To clean up test resources: ./generated/uninstall_traefik_test.sh"
+          - =======================================================

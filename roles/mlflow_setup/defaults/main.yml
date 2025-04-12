@@ -4,19 +4,19 @@ mlflow_release_name: mlflow
 mlflow_image: ghcr.io/mlflow/mlflow:v2.10.2
 mlflow_replicas: 1
 mlflow_command:
-- mlflow
-- server
-- --host=0.0.0.0
-- --port=5000
-- --backend-store-uri=sqlite:////mnt/mlflow/mlflow.db
-- --default-artifact-root=/mnt/mlflow/artifacts
+  - mlflow
+  - server
+  - --host=0.0.0.0
+  - --port=5000
+  - --backend-store-uri=sqlite:////mnt/mlflow/mlflow.db
+  - --default-artifact-root=/mnt/mlflow/artifacts
 
 # Storage configuration
 mlflow_artifact_root: /mnt/mlflow/artifacts
 mlflow_backend_store_uri: sqlite:////mnt/mlflow/mlflow.db
 mlflow_persistent_volume: true
 mlflow_storage_size: 10Gi
-mlflow_storage_class: nfs-client    # Use your cluster's storage class
+mlflow_storage_class: nfs-client # Use your cluster's storage class
 
 # Service & Ingress
 mlflow_service_type: ClusterIP
@@ -34,4 +34,4 @@ mlflow_cpu_limit: 500m
 # Security
 mlflow_basic_auth_enabled: false
 mlflow_basic_auth_username: mlflow
-mlflow_basic_auth_password: password    # Change this for production
+mlflow_basic_auth_password: password # Change this for production

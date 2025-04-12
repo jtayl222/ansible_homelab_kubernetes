@@ -1,18 +1,18 @@
 - name: Create namespace for ECK operator
   kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
+    kubeconfig: "{{ kubeconfig }}"
     state: present
     definition:
       apiVersion: v1
       kind: Namespace
       metadata:
-        name: '{{ namespace }}'
+        name: "{{ namespace }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Deploy ECK CRDs
   kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
+    kubeconfig: "{{ kubeconfig }}"
     state: present
     src: https://download.elastic.co/downloads/eck/{{ version }}/crds.yaml
   delegate_to: "{{ groups['utility'][0] }}"
@@ -20,20 +20,21 @@
 
 - name: Deploy ECK operator
   kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
+    kubeconfig: "{{ kubeconfig }}"
     state: present
     src: https://download.elastic.co/downloads/eck/{{ version }}/operator.yaml
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Wait for ECK operator to start (pause)
-  pause:
+  ansible.builtin.pause:
     seconds: 30
   delegate_to: "{{ groups['utility'][0] }}"
 
 - name: Check if ECK operator StatefulSet is ready
-  shell: |
-    kubectl --kubeconfig={{ kubeconfig }} -n {{ namespace }} get statefulset/elastic-operator -o jsonpath='{.status.readyReplicas}'
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig }} -n {{ namespace }} \
+      get statefulset/elastic-operator -o jsonpath='{.status.readyReplicas}'
   register: operator_replicas
   until: operator_replicas.stdout | int > 0
   retries: 12
@@ -44,5 +45,5 @@
   ignore_errors: true
 
 - name: Display ECK operator status
-  debug:
+  ansible.builtin.debug:
     msg: ECK operator has {{ operator_replicas.stdout | default('0') }} ready replicas

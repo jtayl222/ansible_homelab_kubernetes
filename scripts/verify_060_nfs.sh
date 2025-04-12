@@ -342,10 +342,13 @@ fi
 read -p "Do you want to clean up the test resources? (y/n): " CLEANUP
 if [[ "$CLEANUP" == "y" || "$CLEANUP" == "Y" ]]; then
     echo "Cleaning up test resources..."
-    kubectl --kubeconfig=$KUBECONFIG delete pod -n $TEST_NAMESPACE $TEST_POD $TEST_POD2 --grace-period=0 --force 2>/dev/null || true
+    kubectl --kubeconfig=$KUBECONFIG \
+        delete pod -n $TEST_NAMESPACE $TEST_POD $TEST_POD2 --grace-period=0 --force 2>/dev/null || true
     sleep 5  # Wait for pods to terminate
-    kubectl --kubeconfig=$KUBECONFIG delete pvc -n $TEST_NAMESPACE $TEST_PVC 2>/dev/null || true
-    kubectl --kubeconfig=$KUBECONFIG delete namespace $TEST_NAMESPACE 2>/dev/null || true
+    kubectl --kubeconfig=$KUBECONFIG \
+        delete pvc -n $TEST_NAMESPACE $TEST_PVC 2>/dev/null || true
+    kubectl --kubeconfig=$KUBECONFIG \
+        delete namespace $TEST_NAMESPACE 2>/dev/null || true
     echo "Cleanup completed."
 fi
 

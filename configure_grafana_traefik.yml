@@ -3,23 +3,23 @@
   become: true
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
   pre_tasks:
-  - name: Ensure kubeconfig directory exists
-    file:
-      path: '{{ playbook_dir }}/fetched_tokens'
-      state: directory
-      mode: '0700'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    run_once: true
+    - name: Ensure kubeconfig directory exists
+      file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      run_once: true
 
   roles:
-  - role: traefik_config
-    tags: [traefik]
+    - role: traefik_config
+      tags: [traefik]
   tasks:
-  - name: Configure Grafana for Traefik Ingress
-    include_role:
-      name: grafana_config
-      tasks_from: traefik_ingress
-    tags: [grafana]
+    - name: Configure Grafana for Traefik Ingress
+      include_role:
+        name: grafana_config
+        tasks_from: traefik_ingress
+      tags: [grafana]

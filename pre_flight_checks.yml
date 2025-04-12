@@ -3,142 +3,142 @@
   become: true
   gather_facts: true
   tasks:
-  - name: Check if system meets minimum requirements
-    ansible.builtin.assert:
-      that:
-      - ansible_memtotal_mb >= 1800
-      - ansible_processor_cores >= 2
-      fail_msg: Host does not meet minimum requirements (2 CPU cores, 2GB RAM)
-      success_msg: Host meets minimum requirements
-    ignore_errors: true
-    register: system_requirements
+    - name: Check if system meets minimum requirements
+      ansible.builtin.assert:
+        that:
+          - ansible_memtotal_mb >= 1800
+          - ansible_processor_cores >= 2
+        fail_msg: Host does not meet minimum requirements (2 CPU cores, 2GB RAM)
+        success_msg: Host meets minimum requirements
+      ignore_errors: true
+      register: system_requirements
 
-  - name: Fail if system requirements are not met
-    ansible.builtin.fail:
-      msg: '{{ inventory_hostname }} does not meet minimum system requirements'
-    when: system_requirements is failed
+    - name: Fail if system requirements are not met
+      ansible.builtin.fail:
+        msg: "{{ inventory_hostname }} does not meet minimum system requirements"
+      when: system_requirements is failed
 
-  - name: Check if required ports are available (control plane)
-    ansible.builtin.wait_for:
-      port: '{{ item }}'
-      state: stopped
-      timeout: 5
-    loop:
-    - 6443      # Kubernetes API
-    - 2379      # etcd client
-    - 2380      # etcd peer
-    - 10250     # Kubelet API
-    - 10251     # kube-scheduler
-    - 10252     # kube-controller-manager
-    when: "'k3s_control_plane' in group_names"
-    ignore_errors: true
-    register: control_plane_ports
+    - name: Check if required ports are available (control plane)
+      ansible.builtin.wait_for:
+        port: "{{ item }}"
+        state: stopped
+        timeout: 5
+      loop:
+        - 6443 # Kubernetes API
+        - 2379 # etcd client
+        - 2380 # etcd peer
+        - 10250 # Kubelet API
+        - 10251 # kube-scheduler
+        - 10252 # kube-controller-manager
+      when: "'k3s_control_plane' in group_names"
+      ignore_errors: true
+      register: control_plane_ports
 
-  - name: Check if required ports are available (worker)
-    ansible.builtin.wait_for:
-      port: '{{ item }}'
-      state: stopped
-      timeout: 5
-    loop:
-    - 10250     # Kubelet API
-    - 30000     # NodePort services start
-    - 32767     # NodePort services end
-    when: "'k3s_workers' in group_names"
-    ignore_errors: true
-    register: worker_ports
+    - name: Check if required ports are available (worker)
+      ansible.builtin.wait_for:
+        port: "{{ item }}"
+        state: stopped
+        timeout: 5
+      loop:
+        - 10250 # Kubelet API
+        - 30000 # NodePort services start
+        - 32767 # NodePort services end
+      when: "'k3s_workers' in group_names"
+      ignore_errors: true
+      register: worker_ports
 
-  - name: Port check summary
-    ansible.builtin.debug:
-      msg: |
-        Port check results for {{ inventory_hostname }}:
-        {% if 'k3s_control_plane' in group_names %}
-        Control plane ports:
-        {% for result in control_plane_ports.results %}
-        - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}
-        {% endfor %}
-        {% endif %}
-        {% if 'k3s_workers' in group_names %}
-        Worker ports:
-        {% for result in worker_ports.results %}
-        - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}
-        {% endfor %}
-        {% endif %}
+    - name: Port check summary
+      ansible.builtin.ansible.builtin.debug:
+        msg: |
+          Port check results for {{ inventory_hostname }}:
+          {% if 'k3s_control_plane' in group_names %}
+          Control plane ports:
+          {% for result in control_plane_ports.results %}
+          - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}
+          {% endfor %}
+          {% endif %}
+          {% if 'k3s_workers' in group_names %}
+          Worker ports:
+          {% for result in worker_ports.results %}
+          - Port {{ result.port }}: {{ 'Available' if not result.failed else 'In Use' }}
+          {% endfor %}
+          {% endif %}
 
-  - name: Check required kernel modules
-    ansible.builtin.command: lsmod | grep -E '{{ item }}'
-    register: kernel_modules
-    changed_when: false
-    failed_when: false
-    loop:
-    - overlay
-    - br_netfilter
+    - name: Check required kernel modules
+      ansible.builtin.command: lsmod | grep -E '{{ item }}'
+      register: kernel_modules
+      changed_when: false
+      failed_when: false
+      loop:
+        - overlay
+        - br_netfilter
 
-  - name: Load required kernel modules
-    ansible.builtin.modprobe:
-      name: '{{ item.item }}'
-      state: present
-    loop: '{{ kernel_modules.results }}'
-    when: item.rc != 0
+    - name: Load required kernel modules
+      ansible.builtin.modprobe:
+        name: "{{ item.item }}"
+        state: present
+      loop: "{{ kernel_modules.results }}"
+      when: item.rc != 0
 
-  - name: Enable IP forwarding
-    ansible.builtin.sysctl:
-      name: net.ipv4.ip_forward
-      value: '1'
-      state: present
-      reload: true
+    - name: Enable IP forwarding
+      ansible.builtin.sysctl:
+        name: net.ipv4.ip_forward
+        value: "1"
+        state: present
+        reload: true
 
-  - name: Check required system packages
-    ansible.builtin.package:
-      name:
-      - curl
-      - apt-transport-https
-      - ca-certificates
-      - gnupg
-      - software-properties-common
-      state: present
+    - name: Check required system packages
+      ansible.builtin.package:
+        name:
+          - curl
+          - apt-transport-https
+          - ca-certificates
+          - gnupg
+          - software-properties-common
+        state: present
 
-  - name: Check Docker/Containerd installation
-    ansible.builtin.command: which {{ item }}
-    register: container_runtime
-    changed_when: false
-    failed_when: false
-    loop:
-    - docker
-    - containerd
+    - name: Check Docker/Containerd installation
+      ansible.builtin.command: which {{ item }}
+      register: container_runtime
+      changed_when: false
+      failed_when: false
+      loop:
+        - docker
+        - containerd
 
-  - name: Verify connectivity between nodes
-    ansible.builtin.wait_for:
-      host: "{{ hostvars[item]['ansible_host'] | default(item) }}"
-      port: 22
-      timeout: 5
-    loop: "{{ groups['all'] | difference([inventory_hostname]) }}"
-    ignore_errors: true
-    register: connectivity
+    - name: Verify connectivity between nodes
+      ansible.builtin.wait_for:
+        host: "{{ hostvars[item]['ansible_host'] | default(item) }}"
+        port: 22
+        timeout: 5
+      loop: "{{ groups['all'] | difference([inventory_hostname]) }}"
+      ignore_errors: true
+      register: connectivity
 
-  - name: Connectivity summary
-    ansible.builtin.debug:
-      msg: |
-        Connectivity results for {{ inventory_hostname }}:
-        {% for result in connectivity.results %}
-        - {{ result.item }}: {{ 'Reachable' if not result.failed else 'Unreachable' }}
-        {% endfor %}
+    - name: Connectivity summary
+      ansible.builtin.ansible.builtin.debug:
+        msg: |
+          Connectivity results for {{ inventory_hostname }}:
+          {% for result in connectivity.results %}
+          - {{ result.item }}: {{ 'Reachable' if not result.failed else 'Unreachable' }}
+          {% endfor %}
 
-  - name: Check disk space for Kubernetes
-    ansible.builtin.shell: df -h / | awk 'NR==2 {print $4}'
-    register: available_disk
-    changed_when: false
+    - name: Check disk space for Kubernetes
+      ansible.builtin.shell: df -h / | awk 'NR==2 {print $4}'
+      register: available_disk
+      changed_when: false
 
-  - name: Report disk space
-    ansible.builtin.debug:
-      msg: 'Available disk space on /: {{ available_disk.stdout }}'
+    - name: Report disk space
+      ansible.builtin.ansible.builtin.debug:
+        msg: "Available disk space on /: {{ available_disk.stdout }}"
 
-  - name: Ensure swap is disabled for Kubernetes
-    ansible.builtin.command: swapoff -a
-    changed_when: true
+    - name: Ensure swap is disabled for Kubernetes
+      ansible.builtin.command: swapoff -a
+      changed_when: true
 
-  - name: Disable swap in fstab
-    ansible.builtin.replace:
-      path: /etc/fstab
-      regexp: ^([^#].*\sswap\s+.*)$
-      replace: '# \1'
-      backup: true
+    - name: Disable swap in fstab
+      ansible.builtin.replace:
+        path: /etc/fstab
+        regexp: ^([^#].*\sswap\s+.*)$
+        replace: '# \1'
+        backup: true

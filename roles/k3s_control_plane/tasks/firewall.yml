@@ -7,10 +7,10 @@
 - name: Allow etcd traffic (if multi-control-plane)
   ansible.builtin.ufw:
     rule: allow
-    port: '{{ item }}'
+    port: "{{ item }}"
     proto: tcp
   loop:
-  - 2379-2380    # etcd
+    - 2379-2380 # etcd
 
 - name: Allow VXLAN traffic for flannel
   ansible.builtin.ufw:

@@ -2,66 +2,68 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     elastic_namespace: elastic
 
   tasks:
-  - name: Display cleanup information
-    debug:
-      msg: Starting cleanup of Elasticsearch components from the cluster...
+    - name: Display cleanup information
+      ansible.builtin.debug:
+        msg: Starting cleanup of Elasticsearch components from the cluster...
 
-    # Remove Elasticsearch resources
-  - name: Remove Elasticsearch
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      definition:
-        apiVersion: elasticsearch.k8s.elastic.co/v1
-        kind: Elasticsearch
-        metadata:
-          name: elasticsearch
-          namespace: '{{ elastic_namespace }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+      # Remove Elasticsearch resources
+    - name: Remove Elasticsearch
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: elasticsearch.k8s.elastic.co/v1
+          kind: Elasticsearch
+          metadata:
+            name: elasticsearch
+            namespace: "{{ elastic_namespace }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Wait for Elasticsearch to be deleted
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} get elasticsearch 2>&1 | grep -c "No resources found" || true
-    register: elasticsearch_deleted
-    until: elasticsearch_deleted.stdout|int > 0 or elasticsearch_deleted.rc != 0
-    retries: 12
-    delay: 15
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    changed_when: false
-    ignore_errors: true
+    - name: Wait for Elasticsearch to be deleted
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          get elasticsearch 2>&1 | grep -c "No resources found" || true
+      register: elasticsearch_deleted
+      until: elasticsearch_deleted.stdout|int > 0 or elasticsearch_deleted.rc != 0
+      retries: 12
+      delay: 15
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      changed_when: false
+      ignore_errors: true
 
-    # Check for any leftover PVCs
-  - name: Check for any leftover PVCs
-    shell: |
-      kubectl --kubeconfig={{ kubeconfig_path }} get pvc --all-namespaces | grep elasticsearch-data || true
-    register: leftover_pvcs
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    changed_when: false
-    ignore_errors: true
+      # Check for any leftover PVCs
+    - name: Check for any leftover PVCs
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get pvc --all-namespaces | grep elasticsearch-data || true
+      register: leftover_pvcs
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      changed_when: false
+      ignore_errors: true
 
-  - name: Display PVCs that might need manual cleanup
-    debug:
-      msg:
-      - 'The following PVCs related to Elasticsearch still exist and may need manual
-        cleanup:'
-      - '{{ leftover_pvcs.stdout_lines }}'
-    when: leftover_pvcs.stdout != ""
+    - name: Display PVCs that might need manual cleanup
+      ansible.builtin.debug:
+        msg:
+          - "The following PVCs related to Elasticsearch still exist and may need manual
+            cleanup:"
+          - "{{ leftover_pvcs.stdout_lines }}"
+      when: leftover_pvcs.stdout != ""
 
-  - name: Display cleanup completion message
-    debug:
-      msg:
-      - Elasticsearch cleanup has completed.
-      - '--------------------------------------'
-      - 'The following components have been removed:'
-      - '- Elasticsearch instances'
-      - '--------------------------------------'
-      - 'You can verify removal with:'
-      - kubectl get elasticsearch -n {{ elastic_namespace }}
+    - name: Display cleanup completion message
+      ansible.builtin.debug:
+        msg:
+          - Elasticsearch cleanup has completed.
+          - "--------------------------------------"
+          - "The following components have been removed:"
+          - "- Elasticsearch instances"
+          - "--------------------------------------"
+          - "You can verify removal with:"
+          - kubectl get elasticsearch -n {{ elastic_namespace }}

@@ -1,8 +1,11 @@
 extends: default
 
 rules:
-  line-length: {max: 120} # or disable
+  line-length: {max: 160} # or disable
   indentation: {spaces: 2}
   truthy: disable
-  comments-indentation: disable #optional
-  document-start: disable #optional
+  comments-indentation: disable # optional
+  document-start: disable # optional
+  comments:
+    min-spaces-from-content: 1 # Changed this to stop a mess between linters from Prettier (vscode) to yamllint 
+    

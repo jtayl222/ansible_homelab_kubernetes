@@ -19,11 +19,11 @@
     grafana_ingress_host: grafana.example.com
     grafana_ingress_annotations:
       kubernetes.io/ingress.class: nginx
-      nginx.ingress.kubernetes.io/ssl-redirect: 'false'
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
     # Persistent storage settings - UPDATE THESE
     grafana_persistence_enabled: true
     grafana_persistence_size: 10Gi
-    grafana_storage_class_name: nfs-client     # Use the NFS storage class
+    grafana_storage_class_name: nfs-client # Use the NFS storage class
     # Resource allocation
     grafana_resources_limits_cpu: 200m
     grafana_resources_limits_memory: 256Mi
@@ -36,213 +36,215 @@
     # Dashboard import settings
     grafana_import_dashboards: true
     grafana_custom_dashboards:
-    - name: prometheus-stats
-      gnetId: 2
-      revision: 2
-    - name: node-exporter-full
-      gnetId: 1860
-      revision: 27
+      - name: prometheus-stats
+        gnetId: 2
+        revision: 2
+      - name: node-exporter-full
+        gnetId: 1860
+        revision: 27
     # Grafana plugin list
     grafana_plugins:
-    - grafana-piechart-panel
-    - grafana-clock-panel
+      - grafana-piechart-panel
+      - grafana-clock-panel
     # Helm operation timeout
     helm_operation_timeout: 600
     # Add node variables for dashboard template
-    node: '*'  # Use a wildcard to match all nodes
+    node: "*" # Use a wildcard to match all nodes
   tasks:
-  - name: Show target hosts
-    ansible.builtin.debug:
-      msg: 'Installing Grafana targeting cluster via: {{ inventory_hostname }} ({{
-        ansible_host }})'
+    - name: Show target hosts
+      ansible.builtin.ansible.builtin.debug:
+        msg:
+          "Installing Grafana targeting cluster via: {{ inventory_hostname }} ({{
+          ansible_host }})"
 
-    # Step 1: Fetch the kubeconfig from the remote host
-  - name: Create directory for kubeconfig
-    ansible.builtin.file:
-      path: '{{ playbook_dir }}/fetched_tokens'
-      state: directory
-      mode: '0700'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    run_once: true
+      # Step 1: Fetch the kubeconfig from the remote host
+    - name: Create directory for kubeconfig
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      run_once: true
 
-  - name: Fetch kubeconfig from control plane node
-    ansible.builtin.fetch:
-      src: /etc/rancher/k3s/k3s.yaml
-      dest: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
-      flat: true
+    - name: Fetch kubeconfig from control plane node
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+        flat: true
 
-  - name: Update kubeconfig to use cluster IP
-    ansible.builtin.replace:
-      path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
-      regexp: https://127.0.0.1:6443
-      replace: https://{{ ansible_host }}:6443
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Update kubeconfig to use cluster IP
+      ansible.builtin.replace:
+        path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+        regexp: https://127.0.0.1:6443
+        replace: https://{{ ansible_host }}:6443
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 2: Check if Helm is available locally
-  - name: Check if Helm is installed locally
-    ansible.builtin.command: helm version
-    register: helm_check
-    changed_when: false
-    failed_when: false
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 2: Check if Helm is available locally
+    - name: Check if Helm is installed locally
+      ansible.builtin.command: helm version
+      register: helm_check
+      changed_when: false
+      failed_when: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Fail if Helm is not available locally
-    ansible.builtin.fail:
-      msg: Helm is not installed on your local machine. Please install Helm first.
-    when: helm_check.rc != 0
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Fail if Helm is not available locally
+      ansible.builtin.fail:
+        msg: Helm is not installed on your local machine. Please install Helm first.
+      when: helm_check.rc != 0
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 3: Use Helm locally with the fetched kubeconfig
-  - name: Set local kubeconfig fact
-    ansible.builtin.set_fact:
-      local_kubeconfig_env:
-        KUBECONFIG: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 3: Use Helm locally with the fetched kubeconfig
+    - name: Set local kubeconfig fact
+      ansible.builtin.set_fact:
+        local_kubeconfig_env:
+          KUBECONFIG: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Add Grafana Helm repository locally
-    ansible.builtin.command: helm repo add grafana https://grafana.github.io/helm-charts
-    register: repo_add
-    changed_when: "'has been added' in repo_add.stdout"
-    failed_when: repo_add.rc != 0 and "already exists" not in repo_add.stderr
-    environment: '{{ local_kubeconfig_env }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Add Grafana Helm repository locally
+      ansible.builtin.command: helm repo add grafana https://grafana.github.io/helm-charts
+      register: repo_add
+      changed_when: "'has been added' in repo_add.stdout"
+      failed_when: repo_add.rc != 0 and "already exists" not in repo_add.stderr
+      environment: "{{ local_kubeconfig_env }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Update Helm repositories locally
-    ansible.builtin.command: helm repo update
-    register: repo_update
-    changed_when: repo_update.rc == 0
-    environment: '{{ local_kubeconfig_env }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Update Helm repositories locally
+      ansible.builtin.command: helm repo update
+      register: repo_update
+      changed_when: repo_update.rc == 0
+      environment: "{{ local_kubeconfig_env }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 4: Ensure namespace exists - FIXED VERSION
-  - name: Create monitoring namespace
-    ansible.builtin.command: >
-      kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  create
-      namespace {{ grafana_namespace }}
-    register: namespace_result
-    changed_when: namespace_result.rc == 0
-    failed_when: namespace_result.rc != 0 and "AlreadyExists" not in namespace_result.stderr
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 4: Ensure namespace exists - FIXED VERSION
+    - name: Create monitoring namespace
+      ansible.builtin.command: >
+        kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  create
+        namespace {{ grafana_namespace }}
+      register: namespace_result
+      changed_when: namespace_result.rc == 0
+      failed_when: namespace_result.rc != 0 and "AlreadyExists" not in namespace_result.stderr
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Wait for namespace to be ready
-    ansible.builtin.command: >
-      kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  get namespace
-      {{ grafana_namespace }}
-    register: namespace_check
-    until: namespace_check.rc == 0
-    retries: 5
-    delay: 2
-    changed_when: false
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Wait for namespace to be ready
+      ansible.builtin.command: >
+        kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  \
+          get namespace {{ grafana_namespace }}
+      register: namespace_check
+      until: namespace_check.rc == 0
+      retries: 5
+      delay: 2
+      changed_when: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 5: Create Grafana values template
-  - name: Dump all variables for debugging
-    ansible.builtin.copy:
-      content: '{{ vars | to_nice_yaml }}'
-      dest: '{{ playbook_dir }}/fetched_tokens/all_vars.yaml'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 5: Create Grafana values template
+    - name: Dump all variables for debugging
+      ansible.builtin.copy:
+        content: "{{ vars | to_nice_yaml }}"
+        dest: "{{ playbook_dir }}/fetched_tokens/all_vars.yaml"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Create Grafana values file from template
-    ansible.builtin.template:
-      src: roles/grafana_config/templates/grafana-values.yaml.j2
-      dest: '{{ playbook_dir }}/fetched_tokens/grafana-values.yaml'
-      mode: '0600'
-    register: grafana_values_file
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Create Grafana values file from template
+      ansible.builtin.template:
+        src: roles/grafana_config/templates/grafana-values.yaml.j2
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-values.yaml"
+        mode: "0600"
+      register: grafana_values_file
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 6: Install/Upgrade Grafana using Helm
-  - name: Install/Upgrade Grafana using Helm
-    ansible.builtin.command: >
-      helm upgrade --install {{ grafana_release_name }}  grafana/grafana  --namespace
-      {{ grafana_namespace }}  --values {{ playbook_dir }}/fetched_tokens/grafana-values.yaml  --wait  --timeout
-      {{ helm_operation_timeout | default(600) }}s
-    register: helm_install
-    changed_when: helm_install.rc == 0
-    environment: '{{ local_kubeconfig_env }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 6: Install/Upgrade Grafana using Helm
+    - name: Install/Upgrade Grafana using Helm
+      ansible.builtin.command: >
+        helm upgrade --install {{ grafana_release_name }}  grafana/grafana  --namespace
+        {{ grafana_namespace }}  --values {{ playbook_dir }}/fetched_tokens/grafana-values.yaml  --wait  --timeout
+        {{ helm_operation_timeout | default(600) }}s
+      register: helm_install
+      changed_when: helm_install.rc == 0
+      environment: "{{ local_kubeconfig_env }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 7: Create and apply dashboard ConfigMap
-  - name: Create dashboard ConfigMap from template
-    ansible.builtin.template:
-      src: roles/grafana_config/templates/grafana-dashboards.yaml.j2
-      dest: '{{ playbook_dir }}/fetched_tokens/grafana-dashboards.yaml'
-      mode: '0600'
-    register: grafana_dashboards_file
-    when: grafana_import_dashboards | default(true)
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 7: Create and apply dashboard ConfigMap
+    - name: Create dashboard ConfigMap from template
+      ansible.builtin.template:
+        src: roles/grafana_config/templates/grafana-dashboards.yaml.j2
+        dest: "{{ playbook_dir }}/fetched_tokens/grafana-dashboards.yaml"
+        mode: "0600"
+      register: grafana_dashboards_file
+      when: grafana_import_dashboards | default(true)
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Apply Grafana dashboards ConfigMap
-    ansible.builtin.command: >
-      kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  apply
-      -f {{ playbook_dir }}/fetched_tokens/grafana-dashboards.yaml
-    register: dashboards_applied
-    changed_when: dashboards_applied.rc == 0
-    when: grafana_import_dashboards | default(true) and grafana_dashboards_file.changed
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Apply Grafana dashboards ConfigMap
+      ansible.builtin.command: >
+        kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  apply
+        -f {{ playbook_dir }}/fetched_tokens/grafana-dashboards.yaml
+      register: dashboards_applied
+      changed_when: dashboards_applied.rc == 0
+      when: grafana_import_dashboards | default(true) and grafana_dashboards_file.changed
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 8: Get admin password and service details
-  - name: Get Grafana admin password
-    ansible.builtin.shell: >
-      kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  get secret
-      -n {{ grafana_namespace }} {{ grafana_release_name }} -o jsonpath="{.data.admin-password}"
-      |  base64 --decode
-    register: grafana_password
-    changed_when: false
-    no_log: true
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 8: Get admin password and service details
+    - name: Get Grafana admin password
+      ansible.builtin.shell: >
+        kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  \
+          get secret-n {{ grafana_namespace }} {{ grafana_release_name }} \
+          -o jsonpath="{.data.admin-password}"
+        |  base64 --decode
+      register: grafana_password
+      changed_when: false
+      no_log: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Get Grafana service details
-    ansible.builtin.command: >
-      kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  get service
-      {{ grafana_release_name }} -n {{ grafana_namespace }} -o json
-    register: grafana_service_json
-    changed_when: false
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Get Grafana service details
+      ansible.builtin.command: >
+        kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig  \
+          get service {{ grafana_release_name }} -n {{ grafana_namespace }} -o json
+      register: grafana_service_json
+      changed_when: false
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Parse service details
-    ansible.builtin.set_fact:
-      grafana_service: '{{ grafana_service_json.stdout | from_json }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Parse service details
+      ansible.builtin.set_fact:
+        grafana_service: "{{ grafana_service_json.stdout | from_json }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-    # Step 9: Display access information
-  - name: Display Grafana access information
-    ansible.builtin.debug:
-      msg:
-      - Grafana has been successfully installed!
-      - '---------------------------------------------'
-      - 'Username: admin'
-      - 'Password: {{ grafana_password.stdout }}'
-      - '---------------------------------------------'
-      - 'Access Grafana:'
-      - >
-        {% if grafana_service.spec.type == 'NodePort' %}
-        http://{{ ansible_host }}:{{ grafana_service.spec.ports[0].nodePort }}
-        {% elif grafana_service.spec.type == 'ClusterIP' %}
-        Run: kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig
-        port-forward -n {{ grafana_namespace }} svc/{{ grafana_release_name }} 3000:{{
-        grafana_service.spec.ports[0].port }}
-        Then access: http://localhost:3000
-        {% else %}
-        Service information not available. Check your Grafana deployment.
-        {% endif %}
-      - '---------------------------------------------'
-      - Dashboards have been provisioned and should be available in the Grafana UI
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+      # Step 9: Display access information
+    - name: Display Grafana access information
+      ansible.builtin.ansible.builtin.debug:
+        msg:
+          - Grafana has been successfully installed!
+          - "---------------------------------------------"
+          - "Username: admin"
+          - "Password: {{ grafana_password.stdout }}"
+          - "---------------------------------------------"
+          - "Access Grafana:"
+          - >
+            {% if grafana_service.spec.type == 'NodePort' %}
+            http://{{ ansible_host }}:{{ grafana_service.spec.ports[0].nodePort }}
+            {% elif grafana_service.spec.type == 'ClusterIP' %}
+            Run: kubectl --kubeconfig={{ playbook_dir }}/fetched_tokens/k3s-kubeconfig
+            port-forward -n {{ grafana_namespace }} svc/{{ grafana_release_name }} 3000:{{
+            grafana_service.spec.ports[0].port }}
+            Then access: http://localhost:3000
+            {% else %}
+            Service information not available. Check your Grafana deployment.
+            {% endif %}
+          - "---------------------------------------------"
+          - Dashboards have been provisioned and should be available in the Grafana UI
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false

@@ -5,22 +5,22 @@
   vars:
     grafana_namespace: monitoring
   tasks:
-  - name: Remove test dashboard ConfigMap
-    kubernetes.core.k8s:
-      kind: ConfigMap
-      name: additional-grafana-dashboards
-      namespace: '{{ grafana_namespace }}'
-      state: absent
-    register: removed_dashboards
-    failed_when: false
+    - name: Remove test dashboard ConfigMap
+      kubernetes.core.k8s:
+        kind: ConfigMap
+        name: additional-grafana-dashboards
+        namespace: "{{ grafana_namespace }}"
+        state: absent
+      register: removed_dashboards
+      failed_when: false
 
-  - name: Remove temporary files
-    ansible.builtin.file:
-      path: /tmp/grafana-test-dashboards.yaml
-      state: absent
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Remove temporary files
+      ansible.builtin.file:
+        path: /tmp/grafana-test-dashboards.yaml
+        state: absent
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Display cleanup status
-    ansible.builtin.debug:
-      msg: Grafana test configuration has been cleaned up.
+    - name: Display cleanup status
+      ansible.builtin.ansible.builtin.debug:
+        msg: Grafana test configuration has been cleaned up.

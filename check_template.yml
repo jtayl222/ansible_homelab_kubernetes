@@ -13,7 +13,7 @@
     grafana_ingress_host: grafana.example.com
     grafana_ingress_annotations:
       kubernetes.io/ingress.class: nginx
-      nginx.ingress.kubernetes.io/ssl-redirect: 'false'
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
     grafana_persistence_enabled: true
     grafana_persistence_size: 10Gi
     grafana_storage_class_name: standard
@@ -26,35 +26,37 @@
     prometheus_port: 80
     grafana_import_dashboards: true
     grafana_custom_dashboards:
-    - name: prometheus-stats
-      gnetId: 2
-      revision: 2
-    - name: node-exporter-full
-      gnetId: 1860
-      revision: 27
+      - name: prometheus-stats
+        gnetId: 2
+        revision: 2
+      - name: node-exporter-full
+        gnetId: 1860
+        revision: 27
     grafana_plugins:
-    - grafana-piechart-panel
-    - grafana-clock-panel
+      - grafana-piechart-panel
+      - grafana-clock-panel
   tasks:
-  - name: Create temp Grafana values file from template
-    template:
-      src: roles/grafana_config/templates/grafana-values.yaml.j2
-      dest: /tmp/test-grafana-values.yaml
+    - name: Create temp Grafana values file from template
+      ansible.builtin.template:
+        src: roles/grafana_config/templates/grafana-values.yaml.j2
+        dest: /tmp/test-grafana-values.yaml
+        mode: '0640'  # Owner can read/write, group can read, others have no access
 
-  - name: Check YAML syntax
-    command: python3 -c "import yaml; yaml.safe_load(open('/tmp/test-grafana-values.yaml'))"
-    register: yaml_check
-    ignore_errors: true
+    - name: Check YAML syntax
+      command: python3 -c "import yaml; yaml.safe_load(open('/tmp/test-grafana-values.yaml'))"
+      register: yaml_check
+      ignore_errors: true
 
-  - name: Show YAML check result
-    debug:
-      msg: "YAML syntax {{ 'OK' if yaml_check.rc == 0 else 'ERROR: ' + yaml_check.stderr
-        }}"
-  - name: Display rendered template
-    command: cat /tmp/test-grafana-values.yaml
-    register: template_content
-    changed_when: false
+    - name: Show YAML check result
+      ansible.builtin.debug:
+        msg:
+          "YAML syntax {{ 'OK' if yaml_check.rc == 0 else 'ERROR: ' + yaml_check.stderr
+          }}"
+    - name: Display rendered template
+      command: cat /tmp/test-grafana-values.yaml
+      register: template_content
+      changed_when: false
 
-  - name: Show template
-    debug:
-      msg: '{{ template_content.stdout_lines }}'
+    - name: Show template
+      ansible.builtin.debug:
+        msg: "{{ template_content.stdout_lines }}"

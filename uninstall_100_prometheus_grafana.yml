@@ -3,455 +3,486 @@
   become: true
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     prometheus_namespace: monitoring
     prometheus_release_name: prometheus
-    grafana_release_name: '{{ prometheus_release_name }}-grafana'  # This is now part of kube-prometheus-stack
-    delete_namespace: true  # Set to false if you want to keep the namespace
-    delete_pvc: true  # Delete Persistent Volume Claims if they exist
-    delete_configmaps: true  # Delete ConfigMaps
-    force_delete: false  # Set to true for forceful deletion
-    delete_crds: true  # Delete Custom Resource Definitions (CRDs)
+    grafana_release_name: "{{ prometheus_release_name }}-grafana" # This is now part of kube-prometheus-stack
+    delete_namespace: true # Set to false if you want to keep the namespace
+    delete_pvc: true # Delete Persistent Volume Claims if they exist
+    delete_configmaps: true # Delete ConfigMaps
+    force_delete: false # Set to true for forceful deletion
+    delete_crds: true # Delete Custom Resource Definitions (CRDs)
 
   tasks:
-  - name: Ensure kubeconfig directory exists
-    file:
-      path: '{{ playbook_dir }}/fetched_tokens'
-      state: directory
-      mode: '0755'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Ensure kubeconfig directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: "0755"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Check if kubeconfig exists
-    stat:
-      path: '{{ kubeconfig_path }}'
-    register: kubeconfig_stat
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Check if kubeconfig exists
+      stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Fetch kubeconfig from k3s server if not exists
-    ansible.builtin.fetch:
-      src: /etc/rancher/k3s/k3s.yaml
-      dest: '{{ kubeconfig_path }}'
-      flat: yes
-    when: not kubeconfig_stat.stat.exists
+    - name: Fetch kubeconfig from k3s server if not exists
+      ansible.builtin.fetch:
+        src: /etc/rancher/k3s/k3s.yaml
+        dest: "{{ kubeconfig_path }}"
+        flat: yes
+      when: not kubeconfig_stat.stat.exists
 
-  - name: Update kubeconfig server address if newly created
-    ansible.builtin.replace:
-      path: '{{ kubeconfig_path }}'
-      regexp: https://127.0.0.1:6443
-      replace: https://{{ ansible_default_ipv4.address }}:6443
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: not kubeconfig_stat.stat.exists
+    - name: Update kubeconfig server address if newly created
+      ansible.builtin.replace:
+        path: "{{ kubeconfig_path }}"
+        regexp: https://127.0.0.1:6443
+        replace: https://{{ ansible_default_ipv4.address }}:6443
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: not kubeconfig_stat.stat.exists
 
-  - name: Check if namespace exists
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      kind: Namespace
-      name: '{{ prometheus_namespace }}'
-    register: namespace_check
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Check if namespace exists
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Namespace
+        name: "{{ prometheus_namespace }}"
+      register: namespace_check
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Skip cleanup if namespace doesn't exist
-    meta: end_play
-    when: namespace_check.failed or namespace_check.resources | length == 0
+    - name: Skip cleanup if namespace doesn't exist
+      meta: end_play
+      when: namespace_check.failed or namespace_check.resources | length == 0
 
-  - name: Remove Traefik IngressRoute for Grafana
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      api_version: traefik.io/v1alpha1    # Updated from traefik.containo.us/v1alpha1
-      kind: IngressRoute
-      name: grafana-route
-      namespace: '{{ prometheus_namespace }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Remove Traefik IngressRoute for Grafana
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: traefik.io/v1alpha1 # Updated from traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        name: grafana-route
+        namespace: "{{ prometheus_namespace }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Check for other IngressRoutes in namespace
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      api_version: traefik.io/v1alpha1    # Updated from traefik.containo.us/v1alpha1
-      kind: IngressRoute
-      namespace: '{{ prometheus_namespace }}'
-    register: other_ingressroutes
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Check for other IngressRoutes in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: traefik.io/v1alpha1 # Updated from traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        namespace: "{{ prometheus_namespace }}"
+      register: other_ingressroutes
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Remove all IngressRoutes in namespace
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      api_version: traefik.io/v1alpha1    # Updated from traefik.containo.us/v1alpha1
-      kind: IngressRoute
-      name: '{{ item.metadata.name }}'
-      namespace: '{{ prometheus_namespace }}'
-    loop: '{{ other_ingressroutes.resources | default([]) }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-    when: other_ingressroutes.resources is defined
+    - name: Remove all IngressRoutes in namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: traefik.io/v1alpha1 # Updated from traefik.containo.us/v1alpha1
+        kind: IngressRoute
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      loop: "{{ other_ingressroutes.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
+      when: other_ingressroutes.resources is defined
 
-  - name: Remove kube-prometheus-stack using Helm
-    kubernetes.core.helm:
-      name: '{{ prometheus_release_name }}'
-      release_namespace: '{{ prometheus_namespace }}'
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      wait: true
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Remove kube-prometheus-stack using Helm
+      kubernetes.core.helm:
+        name: "{{ prometheus_release_name }}"
+        release_namespace: "{{ prometheus_namespace }}"
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        wait: true
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Wait for Helm releases to be fully removed (30s)
-    pause:
-      seconds: 30
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: Wait for Helm releases to be fully removed (30s)
+      ansible.builtin.pause:
+        seconds: 30
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Create comprehensive cleanup script
-    copy:
-      dest: '{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh'
-      mode: '0755'
-      content: |
-        #!/bin/bash
+    - name: Create comprehensive cleanup script
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
 
-        KUBECONFIG="{{ kubeconfig_path }}"
-        RELEASE="{{ prometheus_release_name }}"
-        NAMESPACE="{{ prometheus_namespace }}"
+          KUBECONFIG="{{ kubeconfig_path }}"
+          RELEASE="{{ prometheus_release_name }}"
+          NAMESPACE="{{ prometheus_namespace }}"
 
-        echo "Starting comprehensive cleanup of Prometheus resources..."
+          echo "Starting comprehensive cleanup of Prometheus resources..."
 
-        # Remove Helm release first
-        echo "Removing Helm release $RELEASE if it exists..."
-        helm --kubeconfig=$KUBECONFIG uninstall $RELEASE -n $NAMESPACE --wait || true
+          # Remove Helm release first
+          echo "Removing Helm release $RELEASE if it exists..."
+          helm --kubeconfig=$KUBECONFIG uninstall $RELEASE -n $NAMESPACE --wait || true
 
-        # Clean up cross-namespace resources in kube-system
-        echo "Cleaning up resources in kube-system namespace..."
-        NAMESPACES_TO_CHECK="kube-system default $NAMESPACE"
+          # Clean up cross-namespace resources in kube-system
+          echo "Cleaning up resources in kube-system namespace..."
+          NAMESPACES_TO_CHECK="kube-system default $NAMESPACE"
 
-        for NS in $NAMESPACES_TO_CHECK; do
-          echo "Checking namespace: $NS"
+          for NS in $NAMESPACES_TO_CHECK; do
+            echo "Checking namespace: $NS"
 
-          # Services
-          kubectl --kubeconfig=$KUBECONFIG get services -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting Service in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete service $res -n $NS --ignore-not-found=true
+            # Services
+            kubectl --kubeconfig=$KUBECONFIG \
+              get services -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting Service in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete service $res -n $NS --ignore-not-found=true
+              done
+
+            # ServiceMonitors
+            kubectl --kubeconfig=$KUBECONFIG \
+              get servicemonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting ServiceMonitor in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete servicemonitor $res -n $NS --ignore-not-found=true
+              done
+
+            # PodMonitors
+            kubectl --kubeconfig=$KUBECONFIG \
+              get podmonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting PodMonitor in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete podmonitor $res -n $NS --ignore-not-found=true
+              done
+
+            # PrometheusRules
+            kubectl --kubeconfig=$KUBECONFIG \
+              get prometheusrules -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting PrometheusRule in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete prometheusrule $res -n $NS --ignore-not-found=true
+              done
+
+            # Deployments
+            kubectl --kubeconfig=$KUBECONFIG \
+              get deployments -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting Deployment in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete deployment $res -n $NS --ignore-not-found=true
+              done
+
+            # StatefulSets
+            kubectl --kubeconfig=$KUBECONFIG \
+              get statefulsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting StatefulSet in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete statefulset $res -n $NS --ignore-not-found=true
+              done
+
+            # DaemonSets
+            kubectl --kubeconfig=$KUBECONFIG \
+              get daemonsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting DaemonSet in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete daemonset $res -n $NS --ignore-not-found=true
+              done
+
+            # Ingresses
+            kubectl --kubeconfig=$KUBECONFIG \
+              get ingress -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting Ingress in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete ingress $res -n $NS --ignore-not-found=true
+              done
+
+            # ConfigMaps
+            kubectl --kubeconfig=$KUBECONFIG \
+              get configmaps -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting ConfigMap in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete configmap $res -n $NS --ignore-not-found=true
+              done
+
+            # Secrets
+            kubectl --kubeconfig=$KUBECONFIG
+              get secrets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                if [[ $res != *"default-token"* ]]; then
+                  echo "Deleting Secret in $NS: $res"
+                  kubectl --kubeconfig=$KUBECONFIG \
+                    delete secret $res -n $NS --ignore-not-found=true
+                fi
+              done
+
+            # Endpoints
+            kubectl --kubeconfig=$KUBECONFIG \
+              get endpoints -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+              while read res; do
+                echo "Deleting Endpoint in $NS: $res"
+                kubectl --kubeconfig=$KUBECONFIG \
+                  delete endpoint $res -n $NS --ignore-not-found=true
+              done
           done
 
-          # ServiceMonitors
-          kubectl --kubeconfig=$KUBECONFIG get servicemonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting ServiceMonitor in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete servicemonitor $res -n $NS --ignore-not-found=true
-          done
+          # Clean up cluster-scoped resources
+          echo "Cleaning up cluster-scoped resources..."
 
-          # PodMonitors
-          kubectl --kubeconfig=$KUBECONFIG get podmonitors -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting PodMonitor in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete podmonitor $res -n $NS --ignore-not-found=true
-          done
+          # Clean up ClusterRoles
+          kubectl --kubeconfig=$KUBECONFIG \
+            get clusterroles | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+            while read res; do
+              echo "Deleting ClusterRole: $res"
+              kubectl --kubeconfig=$KUBECONFIG \
+                delete clusterrole $res --ignore-not-found=true
+            done
 
-          # PrometheusRules
-          kubectl --kubeconfig=$KUBECONFIG get prometheusrules -n $NS 2>/dev/null | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting PrometheusRule in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete prometheusrule $res -n $NS --ignore-not-found=true
-          done
+          # Clean up ClusterRoleBindings
+          kubectl --kubeconfig=$KUBECONFIG \
+            get clusterrolebindings | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
+            while read res; do
+              echo "Deleting ClusterRoleBinding: $res"
+              kubectl --kubeconfig=$KUBECONFIG \
+                delete clusterrolebinding $res --ignore-not-found=true
+            done
 
-          # Deployments
-          kubectl --kubeconfig=$KUBECONFIG get deployments -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting Deployment in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete deployment $res -n $NS --ignore-not-found=true
-          done
+          # Clean up ValidatingWebhookConfigurations
+          kubectl --kubeconfig=$KUBECONFIG \
+            get validatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
+            while read res; do
+              echo "Deleting ValidatingWebhookConfiguration: $res"
+              kubectl --kubeconfig=$KUBECONFIG \
+                delete validatingwebhookconfigurations $res --ignore-not-found=true
+            done
 
-          # StatefulSets
-          kubectl --kubeconfig=$KUBECONFIG get statefulsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting StatefulSet in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete statefulset $res -n $NS --ignore-not-found=true
-          done
+          # Clean up MutatingWebhookConfigurations
+          kubectl --kubeconfig=$KUBECONFIG \
+            get mutatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
+            while read res; do
+              echo "Deleting MutatingWebhookConfiguration: $res"
+              kubectl --kubeconfig=$KUBECONFIG \
+                delete mutatingwebhookconfigurations $res --ignore-not-found=true
+            done
 
-          # DaemonSets
-          kubectl --kubeconfig=$KUBECONFIG get daemonsets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting DaemonSet in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete daemonset $res -n $NS --ignore-not-found=true
-          done
+          echo "Cleanup complete!"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-          # Ingresses
-          kubectl --kubeconfig=$KUBECONFIG get ingress -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting Ingress in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete ingress $res -n $NS --ignore-not-found=true
-          done
+    - name: Run comprehensive cleanup script
+      command:
+        cmd: "{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      changed_when: true
+      ignore_errors: true
 
-          # ConfigMaps
-          kubectl --kubeconfig=$KUBECONFIG get configmaps -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting ConfigMap in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete configmap $res -n $NS --ignore-not-found=true
-          done
+    - name: Clean up custom PrometheusRules
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: monitoring.coreos.com/v1
+        kind: PrometheusRule
+        name: custom-k3s-alerts
+        namespace: "{{ prometheus_namespace }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-          # Secrets
-          kubectl --kubeconfig=$KUBECONFIG get secrets -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            if [[ $res != *"default-token"* ]]; then
-              echo "Deleting Secret in $NS: $res"
-              kubectl --kubeconfig=$KUBECONFIG delete secret $res -n $NS --ignore-not-found=true
-            fi
-          done
+    - name: Clean up additional dashboards ConfigMap
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: ConfigMap
+        name: additional-dashboards
+        namespace: "{{ prometheus_namespace }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-          # Endpoints
-          kubectl --kubeconfig=$KUBECONFIG get endpoints -n $NS | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-          while read res; do
-            echo "Deleting Endpoint in $NS: $res"
-            kubectl --kubeconfig=$KUBECONFIG delete endpoint $res -n $NS --ignore-not-found=true
-          done
-        done
+    - name: List PVCs in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: PersistentVolumeClaim
+        namespace: "{{ prometheus_namespace }}"
+      register: pvcs
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: delete_pvc | bool
+      ignore_errors: true
 
-        # Clean up cluster-scoped resources
-        echo "Cleaning up cluster-scoped resources..."
+    - name: Remove PVCs
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: v1
+        kind: PersistentVolumeClaim
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ pvcs.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: delete_pvc | bool and pvcs.resources is defined
+      ignore_errors: true
 
-        # Clean up ClusterRoles
-        kubectl --kubeconfig=$KUBECONFIG get clusterroles | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-        while read res; do
-          echo "Deleting ClusterRole: $res"
-          kubectl --kubeconfig=$KUBECONFIG delete clusterrole $res --ignore-not-found=true
-        done
+    - name: List ConfigMaps in namespace
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: ConfigMap
+        namespace: "{{ prometheus_namespace }}"
+      register: configmaps
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: delete_configmaps | bool
+      ignore_errors: true
 
-        # Clean up ClusterRoleBindings
-        kubectl --kubeconfig=$KUBECONFIG get clusterrolebindings | grep -E "$RELEASE|prometheus|grafana" | awk '{print $1}' | \
-        while read res; do
-          echo "Deleting ClusterRoleBinding: $res"
-          kubectl --kubeconfig=$KUBECONFIG delete clusterrolebinding $res --ignore-not-found=true
-        done
+    - name: Remove ConfigMaps
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ configmaps.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when:
+        delete_configmaps | bool and configmaps.resources is defined and 'kube-root-ca.crt'
+        not in item.metadata.name
+      ignore_errors: true
 
-        # Clean up ValidatingWebhookConfigurations
-        kubectl --kubeconfig=$KUBECONFIG get validatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
-        while read res; do
-          echo "Deleting ValidatingWebhookConfiguration: $res"
-          kubectl --kubeconfig=$KUBECONFIG delete validatingwebhookconfigurations $res --ignore-not-found=true
-        done
+    - name: List remaining deployments
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Deployment
+        namespace: "{{ prometheus_namespace }}"
+      register: remaining_deployments
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-        # Clean up MutatingWebhookConfigurations
-        kubectl --kubeconfig=$KUBECONFIG get mutatingwebhookconfigurations | grep -E "$RELEASE|prometheus" | awk '{print $1}' | \
-        while read res; do
-          echo "Deleting MutatingWebhookConfiguration: $res"
-          kubectl --kubeconfig=$KUBECONFIG delete mutatingwebhookconfigurations $res --ignore-not-found=true
-        done
+    - name: Force delete remaining deployments if any
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: Deployment
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+        force: "{{ force_delete | bool }}"
+      with_items: "{{ remaining_deployments.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: remaining_deployments.resources is defined
+      ignore_errors: true
 
-        echo "Cleanup complete!"
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
+    - name: List remaining services
+      kubernetes.core.k8s_info:
+        kubeconfig: "{{ kubeconfig_path }}"
+        kind: Service
+        namespace: "{{ prometheus_namespace }}"
+      register: remaining_services
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true
 
-  - name: Run comprehensive cleanup script
-    command:
-      cmd: '{{ playbook_dir }}/fetched_tokens/comprehensive_cleanup.sh'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    changed_when: true
-    ignore_errors: true
+    - name: Delete remaining services if any
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        kind: Service
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      with_items: "{{ remaining_services.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: remaining_services.resources is defined
+      ignore_errors: true
 
-  - name: Clean up custom PrometheusRules
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      api_version: monitoring.coreos.com/v1
-      kind: PrometheusRule
-      name: custom-k3s-alerts
-      namespace: '{{ prometheus_namespace }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Remove Prometheus Operator CRDs if requested
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        api_version: apiextensions.k8s.io/v1
+        kind: CustomResourceDefinition
+        name: "{{ item }}.monitoring.coreos.com"
+        state: absent
+      loop:
+        - alertmanagerconfigs
+        - alertmanagers
+        - podmonitors
+        - probes
+        - prometheuses
+        - prometheusrules
+        - servicemonitors
+        - thanosrulers
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: delete_crds | bool
+      ignore_errors: true
 
-  - name: Clean up additional dashboards ConfigMap
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      kind: ConfigMap
-      name: additional-dashboards
-      namespace: '{{ prometheus_namespace }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Delete the monitoring namespace
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        name: "{{ prometheus_namespace }}"
+        api_version: v1
+        kind: Namespace
+        state: absent
+        wait: true
+        wait_timeout: 120
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      when: delete_namespace | bool
+      ignore_errors: true
 
-  - name: List PVCs in namespace
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      kind: PersistentVolumeClaim
-      namespace: '{{ prometheus_namespace }}'
-    register: pvcs
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_pvc | bool
-    ignore_errors: true
+    - name: Display cleanup status
+      ansible.builtin.debug:
+        msg:
+          - ====================================
+          - Prometheus and Grafana Cleanup Complete
+          - ====================================
+          - "The following resources have been removed:"
+          - "- Helm release: kube-prometheus-stack ({{ prometheus_release_name }})"
+          - "- Custom dashboards added by install_100_monitoring.yml"
+          - "- Custom PrometheusRules for alerts"
+          - "- Traefik IngressRoutes for monitoring services"
+          - "- ConfigMaps: {{ 'All related ConfigMaps' if delete_configmaps else 'None
+            (skipped)' }}"
+          - "- PVCs: {{ 'All related PVCs' if delete_pvc else 'None (skipped)' }}"
+          - "- CRDs: {{ 'All Prometheus Operator CRDs' if delete_crds else 'None (preserved)'
+            }}"
+          - "- Namespace: {{ prometheus_namespace if delete_namespace else 'Preserved
+            (not deleted)' }}"
+          - ====================================
+          - "If you encounter any remaining resources, run this playbook again with force_delete:
+            true"
+          - ====================================
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
 
-  - name: Remove PVCs
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      api_version: v1
-      kind: PersistentVolumeClaim
-      name: '{{ item.metadata.name }}'
-      namespace: '{{ prometheus_namespace }}'
-    with_items: '{{ pvcs.resources | default([]) }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_pvc | bool and pvcs.resources is defined
-    ignore_errors: true
-
-  - name: List ConfigMaps in namespace
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      kind: ConfigMap
-      namespace: '{{ prometheus_namespace }}'
-    register: configmaps
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_configmaps | bool
-    ignore_errors: true
-
-  - name: Remove ConfigMaps
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      api_version: v1
-      kind: ConfigMap
-      name: '{{ item.metadata.name }}'
-      namespace: '{{ prometheus_namespace }}'
-    with_items: '{{ configmaps.resources | default([]) }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_configmaps | bool and configmaps.resources is defined and 'kube-root-ca.crt'
-      not in item.metadata.name
-    ignore_errors: true
-
-  - name: List remaining deployments
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      kind: Deployment
-      namespace: '{{ prometheus_namespace }}'
-    register: remaining_deployments
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-
-  - name: Force delete remaining deployments if any
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      kind: Deployment
-      name: '{{ item.metadata.name }}'
-      namespace: '{{ prometheus_namespace }}'
-      force: '{{ force_delete | bool }}'
-    with_items: '{{ remaining_deployments.resources | default([]) }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: remaining_deployments.resources is defined
-    ignore_errors: true
-
-  - name: List remaining services
-    kubernetes.core.k8s_info:
-      kubeconfig: '{{ kubeconfig_path }}'
-      kind: Service
-      namespace: '{{ prometheus_namespace }}'
-    register: remaining_services
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
-
-  - name: Delete remaining services if any
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      state: absent
-      kind: Service
-      name: '{{ item.metadata.name }}'
-      namespace: '{{ prometheus_namespace }}'
-    with_items: '{{ remaining_services.resources | default([]) }}'
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: remaining_services.resources is defined
-    ignore_errors: true
-
-  - name: Remove Prometheus Operator CRDs if requested
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      api_version: apiextensions.k8s.io/v1
-      kind: CustomResourceDefinition
-      name: '{{ item }}.monitoring.coreos.com'
-      state: absent
-    loop:
-    - alertmanagerconfigs
-    - alertmanagers
-    - podmonitors
-    - probes
-    - prometheuses
-    - prometheusrules
-    - servicemonitors
-    - thanosrulers
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_crds | bool
-    ignore_errors: true
-
-  - name: Delete the monitoring namespace
-    kubernetes.core.k8s:
-      kubeconfig: '{{ kubeconfig_path }}'
-      name: '{{ prometheus_namespace }}'
-      api_version: v1
-      kind: Namespace
-      state: absent
-      wait: true
-      wait_timeout: 120
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    when: delete_namespace | bool
-    ignore_errors: true
-
-  - name: Display cleanup status
-    debug:
-      msg:
-      - ====================================
-      - Prometheus and Grafana Cleanup Complete
-      - ====================================
-      - 'The following resources have been removed:'
-      - '- Helm release: kube-prometheus-stack ({{ prometheus_release_name }})'
-      - '- Custom dashboards added by install_100_monitoring.yml'
-      - '- Custom PrometheusRules for alerts'
-      - '- Traefik IngressRoutes for monitoring services'
-      - "- ConfigMaps: {{ 'All related ConfigMaps' if delete_configmaps else 'None
-        (skipped)' }}"
-      - "- PVCs: {{ 'All related PVCs' if delete_pvc else 'None (skipped)' }}"
-      - "- CRDs: {{ 'All Prometheus Operator CRDs' if delete_crds else 'None (preserved)'
-        }}"
-      - "- Namespace: {{ prometheus_namespace if delete_namespace else 'Preserved
-        (not deleted)' }}"
-      - ====================================
-      - 'If you encounter any remaining resources, run this playbook again with force_delete:
-        true'
-      - ====================================
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-
-  - name: Remove local files
-    file:
-      path: '{{ playbook_dir }}/{{ item }}'
-      state: absent
-    with_items:
-    - fetched_tokens/install_crds.sh
-    - fetched_tokens/prometheus-values.yaml
-    - fetched_tokens/grafana-values.yaml
-    - fetched_tokens/grafana-ingressroute.yaml
-    - fetched_tokens/additional-dashboards.yaml
-    - fetched_tokens/custom-prometheus-rules.yaml
-    delegate_to: "{{ groups['utility'][0] }}"
-    become: false
-    ignore_errors: true
+    - name: Remove local files
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/{{ item }}"
+        state: absent
+      with_items:
+        - fetched_tokens/install_crds.sh
+        - fetched_tokens/prometheus-values.yaml
+        - fetched_tokens/grafana-values.yaml
+        - fetched_tokens/grafana-ingressroute.yaml
+        - fetched_tokens/additional-dashboards.yaml
+        - fetched_tokens/custom-prometheus-rules.yaml
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      ignore_errors: true

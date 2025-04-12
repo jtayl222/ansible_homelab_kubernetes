@@ -24,7 +24,8 @@ case "$choice" in
   2)
     echo "Checking access via NodePort direct to service..."
     kubectl --kubeconfig=$KUBECONFIG get service -n kubernetes-dashboard
-    NODE_PORT=$(kubectl --kubeconfig=$KUBECONFIG get service dashboard-direct-access -n kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "31000")
+    NODE_PORT=$(kubectl --kubeconfig=$KUBECONFIG \
+      get service dashboard-direct-access -n kubernetes-dashboard -o jsonpath='{.spec.ports[0].nodePort}' 2>/dev/null || echo "31000")
     echo "Using NodePort: $NODE_PORT"
     curl -v "http://${NODE_IP}:${NODE_PORT}"
     echo -e "\nTrying to open dashboard at http://${NODE_IP}:${NODE_PORT}"
@@ -66,7 +67,8 @@ case "$choice" in
     kubectl --kubeconfig=$KUBECONFIG logs -n kube-system -l app.kubernetes.io/name=traefik --tail=20
 
     echo -e "\n=== Checking Dashboard Web Pod Logs ==="
-    WEB_POD=$(kubectl --kubeconfig=$KUBECONFIG get pods -n kubernetes-dashboard -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')
+    WEB_POD=$(kubectl --kubeconfig=$KUBECONFIG \
+      get pods -n kubernetes-dashboard -l app.kubernetes.io/component=web -o jsonpath='{.items[0].metadata.name}')
     kubectl --kubeconfig=$KUBECONFIG logs -n kubernetes-dashboard $WEB_POD
 
     echo -e "\n=== Testing connectivity between components ==="
