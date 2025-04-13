@@ -81,6 +81,7 @@ kubeconfig
 **/*secret*
 **/*password*
 **/*credential*
+!.pre-commit-config.yaml
 
 # Other files that should not be tracked
 */OLD/**

@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/ansible/ansible-lint
+    rev: v25.2.1
+    hooks:
+      - id: ansible-lint
+        files: \.(yaml|yml)$
+
+  - repo: https://github.com/adrienverge/yamllint.git
+    rev: v1.35.1
+    hooks:
+      - id: yamllint
+        types: [yaml] # Only run on yaml files
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+        files: \.(yaml|yml|ansible|sh|py|js|css|html|txt)$ # Apply to these file types
+      - id: end-of-file-fixer
+        files: \.(yaml|yml|ansible|sh|py|js|css|html|txt)$ # Apply to these file types
