@@ -20,12 +20,12 @@
   tasks:
     # Check prerequisites
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: '{{ kubeconfig_path }}'
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.
       when: not kubeconfig_stat.stat.exists
@@ -61,9 +61,15 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
         delete deployment mlflow 2>/dev/null || echo "not found"
       become: false
-      changed_when: false
-      ignore_errors: true
-      when: mlflow_deployment_check is defined and 'not found' not in mlflow_deployment_check.stdout
+      changed_when: "'deleted' in result.stdout"
+      register: result
+      failed_when:
+        - result.rc != 0
+        - "'not found' not in result.stderr"
+      when: >
+        mlflow_deployment_check is defined and 
+        mlflow_deployment_check.stdout is defined and 
+        'not found' not in mlflow_deployment_check.stdout
 
       # Create namespace if needed
     - name: Create MLflow namespace if it doesn't exist
@@ -404,10 +410,15 @@
 
     - name: Create TLS secret for MLflow
       ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} create secret tls mlflow-tls \
           --key {{ tls_key_file }} --cert {{ tls_cert_file }} --dry-run=client -o yaml | \
           kubectl --kubeconfig={{ kubeconfig_path }} apply -f -
       become: false
+      register: tls_secret_result
+      changed_when: "'created' in tls_secret_result.stdout or 'configured' in tls_secret_result.stdout"
+      args:
+        executable: /bin/bash
       when: enable_tls
 
       # Create a persist-data ConfigMap with script to ensure data persistence
@@ -473,28 +484,33 @@
 
       # Test access methods
     - name: Test MLflow path-based access
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}/mlflow/
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}/mlflow/"
+        return_content: no
+        status_code: [200, 301, 302, 307, 308, 404]
       register: mlflow_path_access
       become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
     - name: Test MLflow host-based access
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" -H "Host: {{ mlflow_host }}" http://{{ control_plane_ip }}/
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}/"
+        return_content: no
+        headers:
+          Host: "{{ mlflow_host }}"
+        status_code: [200, 301, 302, 307, 308, 404]
       register: mlflow_host_access
       become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
     - name: Test MLflow direct NodePort access
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
+        return_content: no
+        status_code: [200, 301, 302, 307, 308, 404]
       register: mlflow_nodeport_access
       become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
       # Make a test file to verify persistence
     - name: Create test file to verify persistence
@@ -512,20 +528,22 @@
       changed_when: false
       ignore_errors: true
 
-      # Display access status
+    - name: Set access status variables
+      ansible.builtin.set_fact:
+        path_access_status: "{{ mlflow_path_access.status if mlflow_path_access is defined else 'Failed - connection error' }}"
+        host_access_status: "{{ mlflow_host_access.status if mlflow_host_access is defined else 'Failed - connection error' }}"
+        nodeport_access_status: "{{ mlflow_nodeport_access.status if mlflow_nodeport_access is defined else 'Failed - connection error' }}"
+        persistence_status: "{{ 'Success' if persistence_test.rc == 0 else 'Failed - ' + persistence_test.stderr }}"
+
+    # Display access status
     - name: Display access test results
       ansible.builtin.debug:
         msg:
           - 'Access test results:'
-          - "- Path-based access (/mlflow/): {{ mlflow_path_access.stdout if mlflow_path_access.rc
-            == 0 else 'Failed - ' + mlflow_path_access.stderr }}"
-          - "- Host-based access ({{ mlflow_host }}): {{ mlflow_host_access.stdout if
-            mlflow_host_access.rc == 0 else 'Failed - ' + mlflow_host_access.stderr }}"
-          - "- NodePort access (port {{ mlflow_nodeport }}): {{ mlflow_nodeport_access.stdout
-            if mlflow_nodeport_access.rc == 0 else 'Failed - ' + mlflow_nodeport_access.stderr
-            }}"
-          - "- Persistence test: {{ 'Success' if persistence_test.rc == 0 else 'Failed
-            - ' + persistence_test.stderr }}"
+          - "- Path-based access (/mlflow/): {{ path_access_status }}"
+          - "- Host-based access ({{ mlflow_host }}): {{ host_access_status }}"
+          - "- NodePort access (port {{ mlflow_nodeport }}): {{ nodeport_access_status }}"
+          - "- Persistence test: {{ persistence_status }}"
 
       # Display installation summary
     - name: Display MLflow installation summary

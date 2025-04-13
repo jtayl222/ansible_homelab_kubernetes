@@ -73,8 +73,12 @@
       changed_when: false
 
     - name: Test HTTP Elasticsearch ingress connectivity
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 http://{{ control_plane_ip }}/elasticsearch
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}/elasticsearch"
+        method: GET
+        return_content: no
+        status_code: 200,401
+        timeout: 5
       register: es_http_access
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -168,7 +172,7 @@
             DETECTED' }}"
 
     - name: Set verification status
-      set_fact:
+      ansible.builtin.set_fact:
         ingress_healthy:
           "{{ servertransport_exists.rc == 0 and es_middleware_exists.rc
           == 0 and kibana_middleware_exists.rc == 0 and es_ingressroute_exists.rc ==
@@ -178,6 +182,6 @@
           or kibana_https_access.stdout in ['200', '302', '303', '307']) }}"
 
     - name: Fail if ingress is not healthy
-      fail:
+      ansible.builtin.fail:
         msg: ECK Ingress verification failed. See output above for details.
       when: not ingress_healthy

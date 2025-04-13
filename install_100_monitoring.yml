@@ -24,14 +24,14 @@
       become: false
 
     - name: Check if kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found. Please run install_090_prometheus_grafana.yml first.
       when: not kubeconfig_stat.stat.exists
       delegate_to: "{{ groups['utility'][0] }}"

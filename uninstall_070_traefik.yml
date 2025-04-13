@@ -9,12 +9,12 @@
 
   tasks:
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with cleanup.
       when: not kubeconfig_stat.stat.exists
 
@@ -26,7 +26,7 @@
       changed_when: false
 
     - name: Skip cleanup if Traefik is not deployed
-      meta: end_play
+      ansible.builtin.meta: end_play
       when: traefik_deployment.stdout == "not found"
 
     - name: Remove Traefik HelmChartConfig

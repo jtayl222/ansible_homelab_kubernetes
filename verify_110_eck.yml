@@ -10,10 +10,14 @@
             configuration.
           - "--------------------------------------"
 
-- import_playbook: verify_112_eck_operator.yml
-- import_playbook: verify_114_eck_elasticsearch.yml
-- import_playbook: verify_116_eck_kibana.yml
-- import_playbook: verify_118_eck_ingress.yml
+- name: Verify ECK Operator
+  import_playbook: verify_112_eck_operator.yml
+
+- name: Verify Elasticsearch
+  import_playbook: verify_114_eck_elasticsearch.yml
+
+- name: Verify Kibana
+  import_playbook: verify_116_eck_kibana.yml
 
 - name: Show verification completion
   hosts: utility

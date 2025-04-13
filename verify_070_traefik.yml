@@ -13,12 +13,12 @@
   tasks:
     # 1. Check if kubeconfig exists
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.
@@ -97,7 +97,7 @@
 
       # 7. Test dashboard access
     - name: Test dashboard access via domain
-      uri:
+      ansible.builtin.uri:
         url: http://{{ dashboard_subdomain }}.{{ control_plane_ip }}.nip.io/dashboard/
         method: GET
         user: admin
@@ -109,7 +109,7 @@
       ignore_errors: true
 
     - name: Test dashboard access via direct IP
-      uri:
+      ansible.builtin.uri:
         url:
           http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80')}}/dashboard/
         method: GET
@@ -191,7 +191,8 @@
       # 10. Optional: Check for potential issues and provide fixes
     - name: Check Traefik logs for common issues
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} logs -n {{ traefik_namespace }} -l app.kubernetes.io/name=traefik --tail=50 | grep -i 'error\|warn\|fail' || echo "No obvious errors found"
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          logs -n {{ traefik_namespace }} -l app.kubernetes.io/name=traefik --tail=50 | grep -i 'error\|warn\|fail' || echo "No obvious errors found"
       register: traefik_logs
       changed_when: false
       ignore_errors: true

@@ -8,14 +8,14 @@
     prometheus_release_name: prometheus
   tasks:
     - name: Check if kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig file not found at {{ kubeconfig_path }}. Cannot proceed with
           uninstallation.
@@ -71,7 +71,7 @@
           become: false
 
         - name: Run Helm lock cleanup script
-          command:
+          ansible.builtin.command:
             cmd: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
           delegate_to: "{{ groups['utility'][0] }}"
           become: false
@@ -106,7 +106,8 @@
 
             # Remove specific statefulsets first (they often block deletion)
             kubectl --kubeconfig="{{ kubeconfig_path }}" \
-              delete statefulset -n {{ prometheus_namespace }} alertmanager-prometheus-kube-prometheus-alertmanager prometheus-prometheus-kube-prometheus-prometheus \
+              delete statefulset -n {{ prometheus_namespace }} \
+              alertmanager-prometheus-kube-prometheus-alertmanager prometheus-prometheus-kube-prometheus-prometheus \
               --ignore-not-found=true --timeout=30s
 
             # Delete ALL deployments in the namespace with specific labels
@@ -189,7 +190,7 @@
       when: existing_prometheus.stdout | length > 0
 
     - name: Run CRD cleanup script
-      command:
+      ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -244,7 +245,7 @@
       when: namespace_check.stdout | length > 0
 
     - name: Run finalizer removal script
-      command:
+      ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -257,7 +258,8 @@
       ansible.builtin.shell: |
         echo "Checking for remaining resources..."
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
-          get all -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All resources removed"
+          get all -n {{ prometheus_namespace }} \
+          -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All resources removed"
 
         echo "Checking for remaining Helm secrets..."
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
@@ -265,7 +267,8 @@
 
         echo "Checking for ConfigMaps..."
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
-          get configmap -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All ConfigMaps removed"
+          get configmap -n {{ prometheus_namespace }} \
+          -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All ConfigMaps removed"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: verification_check
@@ -290,12 +293,14 @@
 
             # Get all resources with finalizers
             ALL_RESOURCES=$(kubectl --kubeconfig="{{ kubeconfig_path }}" \
-              get all -n {{ prometheus_namespace }} -o json | jq -r '.items[] | select(.metadata.finalizers != null) | .kind + "/" + .metadata.name')
+              get all -n {{ prometheus_namespace }} -o json \
+                | jq -r '.items[] | select(.metadata.finalizers != null) | .kind + "/" + .metadata.name')
 
             # Patch each resource to remove finalizers
             for RESOURCE in $ALL_RESOURCES; do
               echo "Removing finalizers from $RESOURCE"
-              kubectl --kubeconfig="{{ kubeconfig_path }}" patch -n {{ prometheus_namespace }} $RESOURCE -p '{"metadata":{"finalizers":[]}}' --type=merge || true
+              kubectl --kubeconfig="{{ kubeconfig_path }}" \
+                patch -n {{ prometheus_namespace }} $RESOURCE -p '{"metadata":{"finalizers":[]}}' --type=merge || true
             done
 
             # Force delete pods with extreme prejudice

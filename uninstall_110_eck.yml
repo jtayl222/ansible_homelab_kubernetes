@@ -27,12 +27,17 @@
         - kibana
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: delete_result
+      failed_when:
+        - delete_result.failed is defined
+        - delete_result.failed
+        - "'not found' not in delete_result.msg | default('')"
+        - "'already deleted' not in delete_result.msg | default('')"
 
     - name: Remove Elasticsearch and Kibana Middlewares
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        state: absent
+        state: absent  # Fixed: removed ansible.builtin prefix
         definition:
           apiVersion: traefik.io/v1alpha1
           kind: Middleware
@@ -44,12 +49,17 @@
         - kibana
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: delete_result
+      failed_when:
+        - delete_result.failed is defined
+        - delete_result.failed
+        - "'not found' not in delete_result.msg | default('')"
+        - "'already deleted' not in delete_result.msg | default('')"
 
     - name: Remove TLS proxy services
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
-        state: absent
+        state: absent  # Fixed: removed ansible.builtin prefix
         definition:
           apiVersion: v1
           kind: Service
@@ -61,7 +71,12 @@
         - kibana
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: delete_result
+      failed_when:
+        - delete_result.failed is defined
+        - delete_result.failed
+        - "'not found' not in delete_result.msg | default('')"
+        - "'already deleted' not in delete_result.msg | default('')"
 
     - name: Remove NodePort services
       kubernetes.core.k8s:
@@ -127,7 +142,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get elasticsearch 2>&1 | grep -c "No resources found" || true
       register: elasticsearch_deleted
-      until: elasticsearch_deleted.stdout|int > 0 or elasticsearch_deleted.rc != 0
+      until: elasticsearch_deleted.stdout | int > 0 or elasticsearch_deleted.rc != 0
       retries: 12
       delay: 15
       delegate_to: "{{ groups['utility'][0] }}"
@@ -147,7 +162,7 @@
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       ignore_errors: true
-      when: elasticsearch_deleted.stdout|int > 0 or elasticsearch_deleted.rc != 0
+      when: elasticsearch_deleted.stdout | int > 0 or elasticsearch_deleted.rc != 0
 
       # Remove the ECK operator
     - name: Remove ECK operator

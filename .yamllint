@@ -7,5 +7,4 @@ rules:
   comments-indentation: disable # optional
   document-start: disable # optional
   comments:
-    min-spaces-from-content: 1 # Changed this to stop a mess between linters from Prettier (vscode) to yamllint 
-    
+    min-spaces-from-content: 1 # Changed this to stop a mess between linters from Prettier (vscode) to yamllint

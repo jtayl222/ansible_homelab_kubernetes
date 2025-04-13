@@ -55,6 +55,8 @@
   tags: [ml, seldon]
 
 - name: Display deployment complete banner
+  hosts: localhost
+  gather_facts: false
   tasks:
     - name: Display deployment complete banner
       ansible.builtin.debug:

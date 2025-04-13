@@ -22,12 +22,12 @@
   tasks:
     # SECTION 1: PREREQUISITES
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.
@@ -474,7 +474,8 @@
     - name: Wait for model pod to be ready
       ansible.builtin.shell: |
         echo "Waiting for model pod to be ready (this may take a few minutes)..."
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} wait --for=condition=ready pod -l seldon-deployment-id=iris-model --timeout=300s
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+          wait --for=condition=ready pod -l seldon-deployment-id=iris-model --timeout=300s
       register: model_pod_ready
       become: false
       changed_when: false
@@ -483,10 +484,13 @@
     - name: Check model pod details
       ansible.builtin.shell: |
         echo "Checking model pod details:"
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} describe pods -l seldon-deployment-id=iris-model
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+          describe pods -l seldon-deployment-id=iris-model
         echo "Checking model pod logs:"
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} logs -l seldon-deployment-id=iris-model -c classifier || echo "Container not ready yet"
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} logs -l seldon-deployment-id=iris-model -c seldon-container-engine || echo "Container not ready yet"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+          logs -l seldon-deployment-id=iris-model -c classifier || echo "Container not ready yet"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+          logs -l seldon-deployment-id=iris-model -c seldon-container-engine || echo "Container not ready yet"
       register: model_pod_details
       become: false
       changed_when: false

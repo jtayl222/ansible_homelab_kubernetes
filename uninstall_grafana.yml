@@ -129,8 +129,8 @@
 
     - name: Delete Grafana statefulset if it exists
       ansible.builtin.command: >
-        kubectl \
-          delete statefulset {{ grafana_release_name }} -n {{ grafana_namespace }} {% if force_delete %}--force --grace-period=0{% endif %}
+        kubectl delete statefulset {{ grafana_release_name }} \
+          -n {{ grafana_namespace }} {% if force_delete %}--force --grace-period=0{% endif %}
       register: statefulset_delete
       changed_when: statefulset_delete.rc == 0
       failed_when: false
@@ -138,8 +138,7 @@
 
     - name: Delete Grafana services
       ansible.builtin.command: >
-        kubectl \
-          delete service {{ grafana_release_name }} -n {{ grafana_namespace }}
+        kubectl delete service {{ grafana_release_name }} -n {{ grafana_namespace }}
       register: service_delete
       changed_when: service_delete.rc == 0
       failed_when: false
@@ -147,8 +146,8 @@
 
     - name: Delete Grafana ConfigMaps
       ansible.builtin.command: >
-        kubectl \
-          delete configmap -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+        kubectl delete configmap -n {{ grafana_namespace }} \
+            -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
       register: configmap_delete
       changed_when: configmap_delete.rc == 0
       failed_when: false
@@ -156,8 +155,7 @@
 
     - name: Delete Grafana dashboard ConfigMaps
       ansible.builtin.command: >
-        kubectl \
-          delete configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 {%
+        kubectl delete configmap -n {{ grafana_namespace }} -l grafana_dashboard=1 {%
         if force_delete %}--force --grace-period=0{% endif %}
       register: dashboard_configmap_delete
       changed_when: dashboard_configmap_delete.rc == 0
@@ -166,8 +164,8 @@
 
     - name: Delete Grafana secrets
       ansible.builtin.command: >
-        kubectl \
-          delete secret -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+        kubectl delete secret -n {{ grafana_namespace }} \
+          -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
       register: secret_delete
       changed_when: secret_delete.rc == 0
       failed_when: false
@@ -185,8 +183,8 @@
 
     - name: Delete Grafana PVCs if they exist
       ansible.builtin.command: >
-        kubectl \
-          delete pvc -n {{ grafana_namespace }} -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
+        kubectl delete pvc -n {{ grafana_namespace }} \
+          -l "app.kubernetes.io/instance={{ grafana_release_name }}" {% if force_delete %}--force --grace-period=0{% endif %}
       register: pvc_delete
       changed_when: pvc_delete.rc == 0
       failed_when: false

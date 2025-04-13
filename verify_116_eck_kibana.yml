@@ -122,7 +122,8 @@
 
     - name: Check Kibana logs for errors
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} logs -l kibana.k8s.elastic.co/name=kibana --tail=20 | grep -i error || echo "No errors found in recent logs"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          logs -l kibana.k8s.elastic.co/name=kibana --tail=20 | grep -i error || echo "No errors found in recent logs"
       register: kibana_logs
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -174,7 +175,8 @@
 
     - name: Verify NodePort is actually listening on control plane
       ansible.builtin.shell: |
-        ssh {{ hostvars[groups['k3s_control_plane'][0]].ansible_user }}@{{ control_plane_ip }} 'sudo netstat -tulpn | grep 30056 || echo "NodePort not found on host"'
+        ssh {{ hostvars[groups['k3s_control_plane'][0]].ansible_user }}@{{ control_plane_ip }} \
+          'sudo netstat -tulpn | grep 30056 || echo "NodePort not found on host"'
       register: nodeport_listening
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -276,7 +278,8 @@
 
     - name: Get detailed pod status
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod -l kibana.k8s.elastic.co/name=kibana | grep -A5 "Conditions:" || echo "No detailed conditions found"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          describe pod -l kibana.k8s.elastic.co/name=kibana | grep -A5 "Conditions:" || echo "No detailed conditions found"
       register: pod_conditions
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -303,7 +306,7 @@
         msg: "{{ pod_events.stdout_lines }}"
 
     - name: Set verification status with more data-driven criteria
-      set_fact:
+      ansible.builtin.set_fact:
         kibana_healthy: >-
           {{
             kibana_cr_exists.rc == 0 and
@@ -325,6 +328,6 @@
           | lower else 'No' }}
 
     - name: Fail if Kibana is not healthy (with override option)
-      fail:
+      ansible.builtin.fail:
         msg: Kibana verification failed. See output above for details.
       when: not kibana_healthy and (force_fail | default(true))

@@ -23,7 +23,7 @@
       become: false
 
     - name: Check if kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
       delegate_to: "{{ groups['utility'][0] }}"
@@ -46,14 +46,14 @@
       when: not kubeconfig_stat.stat.exists
 
     - name: Verify kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_verify
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
     - name: Fail if kubeconfig still doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig file not found at {{ kubeconfig_path }}. Check permissions and
           connectivity.
@@ -79,7 +79,7 @@
       failed_when: false
 
     - name: Fail if Prometheus is already installed
-      fail:
+      ansible.builtin.fail:
         msg:
           "Prometheus release {{ prometheus_release_name }} detected: remove or clean
           up first!"
@@ -155,7 +155,7 @@
       become: false
 
     - name: Run CRD installation script
-      command:
+      ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false

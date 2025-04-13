@@ -18,12 +18,12 @@
   tasks:
     # 1. Check if kubeconfig exists
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with verification.
       when: not kubeconfig_stat.stat.exists
 
@@ -37,7 +37,7 @@
       changed_when: false
 
     - name: Fail if MinIO namespace doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: MinIO namespace not found. Please install MinIO first.
       when: "'not found' in minio_ns.stdout"
 
@@ -121,21 +121,25 @@
 
       # 10. Test API access
     - name: Test MinIO API access via NodePort
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}:{{ minio_nodeport }}/"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
       register: api_access
-      become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
       # 11. Test Console access
     - name: Test MinIO Console access via NodePort
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
       register: console_access
-      become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
       # 12. Test S3 operations with mc (if specified ports are actually available)
     - name: Install MinIO Client if needed
@@ -182,43 +186,28 @@
         msg:
           - ==================== MINIO VERIFICATION SUMMARY ====================
           - "Status Overview:"
-          - "- MinIO Namespace: {{ 'Found' if 'not found' not in minio_ns.stdout else
-            'Not found' }}"
-          - "- Helm Release: {{ 'Found' if 'Release not found' not in minio_release.stdout
-            else 'Not found' }}"
-          - "- MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)'
-            if minio_replicas.stdout is defined and minio_replicas.stdout != '0' else
-            'Not running' }}"
-          - "- MinIO Service: {{ 'Available on port ' + minio_svc_port.stdout if minio_svc_port.stdout
-            is defined else 'Not found' }}"
-          - "- NodePort Services: {{ 'Available' if 'not found' not in nodeport_svcs.stdout
-            else 'Not found' }}"
-          - "- IngressRoutes: {{ 'Available' if 'not found' not in ingress_routes.stdout
-            else 'Not found' }}"
-          - "- Persistent Storage: {{ 'Found: ' + minio_pvcs.stdout if minio_pvcs.stdout
-            != '' else 'Not found' }}"
+          - "- MinIO Namespace: {{ 'Found' if 'not found' not in minio_ns.stdout else 'Not found' }}"
+          - "- Helm Release: {{ 'Found' if 'Release not found' not in minio_release.stdout else 'Not found' }}"
+          - "- MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)' if minio_replicas.stdout is defined and minio_replicas.stdout != '0' else 'Not running' }}"
+          - "- MinIO Service: {{ 'Available on port ' + minio_svc_port.stdout if minio_svc_port.stdout is defined else 'Not found' }}"
+          - "- NodePort Services: {{ 'Available' if 'not found' not in nodeport_svcs.stdout else 'Not found' }}"
+          - "- IngressRoutes: {{ 'Available' if 'not found' not in ingress_routes.stdout else 'Not found' }}"
+          - "- Persistent Storage: {{ 'Found: ' + minio_pvcs.stdout if minio_pvcs.stdout != '' else 'Not found' }}"
           - ""
           - "Version Information:"
-          - "- MinIO Image: {{ minio_image.stdout if minio_image.stdout is defined else
-            'Unknown' }}"
+          - "- MinIO Image: {{ minio_image.stdout if minio_image.stdout is defined else 'Unknown' }}"
           - ""
           - "Access Verification:"
-          - "- API via NodePort: {{ 'Accessible (HTTP ' + api_access.stdout + ')' if api_access.rc
-            == 0 else 'Not accessible' }}"
-          - "- Console via NodePort: {{ 'Accessible (HTTP ' + console_access.stdout +
-            ')' if console_access.rc == 0 else 'Not accessible' }}"
-          - "- S3 Operations Test: {{ 'Successful' if s3_test.rc == 0 else 'Failed - see
-            output below' }}"
+          - "- API via NodePort: {{ 'Accessible (HTTP ' + api_access.status|string + ')' if api_access.status is defined else 'Not accessible' }}"
+          - "- Console via NodePort: {{ 'Accessible (HTTP ' + console_access.status|string + ')' if console_access.status is defined else 'Not accessible' }}"
+          - "- S3 Operations Test: {{ 'Successful' if s3_test.rc == 0 else 'Failed - see output below' }}"
           - ""
           - "Pod Status:"
-          - "{{ minio_pods.stdout if minio_pods.stdout is defined else 'No pods found'
-            }}"
+          - "{{ minio_pods.stdout if minio_pods.stdout is defined else 'No pods found' }}"
           - ""
           - "Access Information:"
-          - "- MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/ or
-            http://{{ minio_host }}/"
-          - "- MinIO Console: http://{{ control_plane_ip }}:{{ minio_console_nodeport
-            }}/ or http://{{ minio_console_host }}/"
+          - "- MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/ or http://{{ minio_host }}/"
+          - "- MinIO Console: http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/ or http://{{ minio_console_host }}/"
           - "- Username: {{ minio_access_key }}"
           - "- Password: {{ minio_secret_key }}"
           - ""

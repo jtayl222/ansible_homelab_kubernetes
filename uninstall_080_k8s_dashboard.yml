@@ -13,7 +13,7 @@
         KUBECONFIG: "{{ kubeconfig_path }}"
 
     - name: Skip cleanup if namespace doesn't exist
-      meta: end_play
+      ansible.builtin.meta: end_play
       when: dashboard_namespace.stdout == ""
 
     - name: Remove Kubernetes Dashboard Ingress

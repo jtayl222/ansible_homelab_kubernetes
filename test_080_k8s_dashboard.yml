@@ -15,7 +15,7 @@
         mode: "0755"
 
     - name: Check if kubeconfig exists locally
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
@@ -95,7 +95,7 @@
       ignore_errors: true
 
     - name: Set dashboard token fact
-      set_fact:
+      ansible.builtin.set_fact:
         dashboard_token:
           "{{ dashboard_token_v124.stdout if not dashboard_token_v124.failed
           else (dashboard_token_old.stdout | default('Token not available')) }}"

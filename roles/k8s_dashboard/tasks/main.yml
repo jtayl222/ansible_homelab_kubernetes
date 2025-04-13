@@ -1,5 +1,5 @@
 - name: Download Helm install script
-  get_url:
+  ansible.builtin.get_url:
     url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
     dest: /tmp/get_helm.sh
     mode: "0700"
@@ -7,58 +7,65 @@
   become: false
 
 - name: Install Helm
-  command: /tmp/get_helm.sh
+  ansible.builtin.command: /tmp/get_helm.sh
   args:
     creates: /usr/local/bin/helm
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Ensure required variables are defined
-  set_fact:
-    node_ip: "{{ hostvars[inventory_hostname]['ansible_default_ipv4']['address'] }}"
-    kubeconfig:
-      "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig')}}"
+  ansible.builtin.set_fact:
+    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address']) }}"
+    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig') }}"
 
 - name: Check if Kubernetes Dashboard is already installed
-  command: helm list -n kubernetes-dashboard -q
+  ansible.builtin.command: helm list -n kubernetes-dashboard -q
   register: dashboard_installed
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
-  ignore_errors: true
+  changed_when: false
 
 - name: Uninstall existing Kubernetes Dashboard (if present)
-  command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
+  ansible.builtin.command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
   when: "'kubernetes-dashboard' in dashboard_installed.stdout"
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+  changed_when: true  # This actually changes state by uninstalling
 
 - name: Add Kubernetes Dashboard Helm repository
-  command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
+  ansible.builtin.command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
-  ignore_errors: true
+  register: repo_add_result
+  changed_when: "'has been added' in repo_add_result.stdout"
+  failed_when: 
+    - repo_add_result.rc != 0
+    - "'already exists' not in repo_add_result.stderr"
 
 - name: Update Helm repositories
-  command: helm repo update
+  ansible.builtin.command: helm repo update
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+  changed_when: true  # Helm repo update always refreshes state
 
 - name: Install Kubernetes Dashboard using Helm
-  command: >
+  ansible.builtin.command: >
     helm install kubernetes-dashboard k8s-dashboard/kubernetes-dashboard
     --namespace kubernetes-dashboard --create-namespace
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+  register: install_result
+  changed_when: install_result.rc == 0
 
 - name: Create dashboard admin service account
   kubernetes.core.k8s:
@@ -110,29 +117,33 @@
   become: false
 
 - name: Wait for token to be generated
-  command: >
-    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard \
+  ansible.builtin.command: >
+    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard 
       get secret dashboard-admin-token
-    -o jsonpath='{.data.token}'
+      -o jsonpath='{.data.token}'
   register: token_check
   until: token_check.stdout != ""
   retries: 10
   delay: 5
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+  changed_when: false
 
 - name: Create Ingress manifest for Kubernetes Dashboard
   ansible.builtin.template:
     src: dashboard-ingress.yml.j2
     dest: /tmp/dashboard-ingress.yml
+    mode: '0600'  # Restricted permissions since it might contain sensitive info
   vars:
-    node_ip: "{{ node_ip }}"
+    dashboard_node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.100') }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Apply Ingress for Kubernetes Dashboard
-  command: kubectl apply -f /tmp/dashboard-ingress.yml
+  ansible.builtin.command: kubectl apply -f /tmp/dashboard-ingress.yml
   environment:
     KUBECONFIG: "{{ kubeconfig }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
+  register: apply_result
+  changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"

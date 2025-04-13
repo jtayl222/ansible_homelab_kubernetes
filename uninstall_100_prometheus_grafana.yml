@@ -23,7 +23,7 @@
       become: false
 
     - name: Check if kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
       delegate_to: "{{ groups['utility'][0] }}"
@@ -56,7 +56,7 @@
       ignore_errors: true
 
     - name: Skip cleanup if namespace doesn't exist
-      meta: end_play
+      ansible.builtin.meta: end_play
       when: namespace_check.failed or namespace_check.resources | length == 0
 
     - name: Remove Traefik IngressRoute for Grafana

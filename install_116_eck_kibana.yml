@@ -495,7 +495,7 @@
                 initContainers:
                   - name: init-certs-dir
                     image: busybox:1.33.1
-                    command: [sh, -c, mkdir -p /usr/share/kibana/config/certs]
+                    ansible.builtin.command: [sh, -c, mkdir -p /usr/share/kibana/config/certs]
                     volumeMounts:
                       - name: config-dir
                         mountPath: /usr/share/kibana/config

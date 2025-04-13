@@ -23,12 +23,12 @@
   tasks:
     # 1. Check prerequisites
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.

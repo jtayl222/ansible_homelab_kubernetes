@@ -12,16 +12,18 @@
     argo_nodeport: 30130
     argo_artifacts_pvc: "argo-artifacts"
     argo_artifacts_size: "10Gi"
+    argo_github_base_url: "https://github.com/argoproj/argo-workflows/releases"
+    argo_install_url: "{{ argo_github_base_url }}/download/{{ argo_version }}/install.yaml"
 
   tasks:
     # 1. Check prerequisites
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
       when: not kubeconfig_stat.stat.exists
 
@@ -130,7 +132,7 @@
     # 7. Install Argo Workflows from official manifests
     - name: Install Argo Workflows manifests
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f https://github.com/argoproj/argo-workflows/releases/download/{{ argo_version }}/install.yaml
+        kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f {{ argo_install_url }}
       register: install_result
       become: false
       changed_when: "'created' in install_result.stdout or 'configured' in install_result.stdout"
@@ -356,7 +358,11 @@
             name: argo-workflows-ingress
             namespace: "{{ argo_namespace }}"
             annotations:
-              traefik.ingress.kubernetes.io/custom-response-headers: "Access-Control-Allow-Origin: *||Access-Control-Allow-Methods: GET,POST,OPTIONS||Access-Control-Allow-Headers: DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Authorization"
+              traefik.ingress.kubernetes.io/custom-response-headers: >-
+                Access-Control-Allow-Origin: *||
+                Access-Control-Allow-Methods: GET,POST,OPTIONS||
+                Access-Control-Allow-Headers: DNT,X-CustomHeader,Keep-Alive,User-Agent,X-Requested-With,
+                If-Modified-Since,Cache-Control,Content-Type,Authorization
           spec:
             entryPoints:
               - websecure
@@ -775,7 +781,38 @@
       changed_when: false
       ignore_errors: true
 
-    # 21. Display Argo Workflows installation summary
+    # 21. Variables for Argo Workflows installation summary
+    - name: Set status variables for summary
+      ansible.builtin.set_fact:
+        argo_server_status: >-
+          {% if argo_server_rollout is defined and argo_server_rollout.rc is defined %}
+          {{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment had issues' }}
+          {% else %}Status unknown{% endif %}
+        argo_controller_status: >-
+          {% if argo_controller_rollout is defined and argo_controller_rollout.rc is defined %}
+          {{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment had issues' }}
+          {% else %}Status unknown{% endif %}
+        auth_config_status: >-
+          {% if server_config_result is defined %}
+          {{ 'Yes' if server_config_result.changed | default(false) else 'No - may need manual configuration' }}
+          {% else %}Status unknown{% endif %}
+        template_status: >-
+          {% if template_result is defined and template_result.rc is defined %}
+          {{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready yet' }}
+          {% else %}Not created{% endif %}
+        ui_access_status: >-
+          {% if argo_ui_access is defined and argo_ui_access.stdout is defined %}
+          {{ argo_ui_access.stdout }}
+          {% else %}Failed - see verification output{% endif %}
+        test_workflow_status: >-
+          {% if test_workflow is defined and test_workflow.rc is defined %}
+          {{ 'Submitted successfully' if test_workflow.rc == 0 else 'Failed - see verification output' }}
+          {% else %}Not submitted{% endif %}
+        crd_status: >-
+          {% if crd_check is defined and crd_check.rc is defined %}
+          {{ 'Ready' if crd_check.rc == 0 else 'Not ready - allow more time' }}
+          {% else %}Status unknown{% endif %}
+
     - name: Display Argo Workflows installation summary
       ansible.builtin.debug:
         msg:
@@ -791,19 +828,19 @@
           - "- Copy the generated token and paste it in the Argo UI login screen"
           - ""
           - "Components Deployed:"
-          - "- Argo Server Status: {% if argo_server_rollout is defined and argo_server_rollout.rc is defined %}{{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment had issues' }}{% else %}Status unknown{% endif %}"
-          - "- Argo Controller Status: {% if argo_controller_rollout is defined and argo_controller_rollout.rc is defined %}{{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment had issues' }}{% else %}Status unknown{% endif %}"
-          - "- Auth Config Applied: {% if server_config_result is defined %}{{ 'Yes' if server_config_result.changed | default(false) else 'No - may need manual configuration' }}{% else %}Status unknown{% endif %}"
-          - "- Workflow Template Example: {% if template_result is defined and template_result.rc is defined %}{{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready yet' }}{% else %}Not created{% endif %}"
+          - "- Argo Server Status: {{ argo_server_status }}"
+          - "- Argo Controller Status: {{ argo_controller_status }}"
+          - "- Auth Config Applied: {{ auth_config_status }}"
+          - "- Workflow Template Example: {{ template_status }}"
           - ""
           - "Storage Configuration:"
           - "- Artifacts PVC: {{ argo_artifacts_pvc }} ({{ argo_artifacts_size }})"
           - "- Storage Class: nfs-client"
           - ""
           - "Access Status:"
-          - "- UI Access: {% if argo_ui_access is defined and argo_ui_access.stdout is defined %}{{ argo_ui_access.stdout }}{% else %}Failed - see verification output{% endif %}"
-          - "- Test Workflow: {% if test_workflow is defined and test_workflow.rc is defined %}{{ 'Submitted successfully' if test_workflow.rc == 0 else 'Failed - see verification output' }}{% else %}Not submitted{% endif %}"
-          - "- CRD Status: {% if crd_check is defined and crd_check.rc is defined %}{{ 'Ready' if crd_check.rc == 0 else 'Not ready - allow more time' }}{% else %}Status unknown{% endif %}"
+          - "- UI Access: {{ ui_access_status }}"
+          - "- Test Workflow: {{ test_workflow_status }}"
+          - "- CRD Status: {{ crd_status }}"
           - ""
           - "Next Steps:"
           - "1. Access the Argo UI to view and manage workflows"

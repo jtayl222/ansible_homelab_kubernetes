@@ -11,12 +11,12 @@
     test_app_hostname: test-app.{{ k3s_control_ip }}.nip.io
   tasks:
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg:
           Kubeconfig not found at {{ kubeconfig_path }}. Please run install_070_traefik.yml
           first.

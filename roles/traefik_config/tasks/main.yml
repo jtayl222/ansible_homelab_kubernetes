@@ -7,14 +7,14 @@
   become: false
 
 - name: Fetch kubeconfig from control plane node
-  fetch:
+  ansible.builtin.fetch:
     src: /etc/rancher/k3s/k3s.yaml
     dest: "{{ kubeconfig_path }}"
     flat: true
   when: not kubeconfig_local is defined or not kubeconfig_local
 
 - name: Update kubeconfig with proper server address
-  replace:
+  ansible.builtin.replace:
     path: "{{ kubeconfig_path }}"
     regexp: https://127.0.0.1:6443
     replace: https://{{ ansible_host }}:6443
@@ -24,7 +24,7 @@
 
 # Verify Traefik is running
 - name: Check Traefik deployment
-  command: >
+  ansible.builtin.command: >
     kubectl --kubeconfig={{ kubeconfig_path }}
     -n {{ traefik_namespace }}
     get deployment traefik
@@ -35,7 +35,7 @@
   become: false
 
 - name: Fail if Traefik is not installed
-  fail:
+  ansible.builtin.fail:
     msg:
       Traefik is not installed in the cluster. Please ensure your K3s installation
       includes Traefik.
@@ -45,7 +45,7 @@
 
 # Get Traefik service information for port details
 - name: Get Traefik service information
-  command: >
+  ansible.builtin.command: >
     kubectl --kubeconfig={{ kubeconfig_path }}
     -n {{ traefik_namespace }}
     get service traefik -o json
@@ -55,7 +55,7 @@
   become: false
 
 - name: Parse Traefik service details
-  set_fact:
+  ansible.builtin.set_fact:
     traefik_service_json: "{{ traefik_service.stdout | from_json }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
@@ -70,7 +70,7 @@
   become: false
 
 - name: Apply Traefik dashboard IngressRoute
-  command: >
+  ansible.builtin.command: >
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-dashboard.yaml
   register: dashboard_applied
   changed_when: dashboard_applied.rc == 0
@@ -87,7 +87,7 @@
   become: false
 
 - name: Apply Traefik middlewares
-  command: >
+  ansible.builtin.command: >
     kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/fetched_tokens/traefik-middlewares.yaml
   register: middlewares_applied
   changed_when: middlewares_applied.rc == 0

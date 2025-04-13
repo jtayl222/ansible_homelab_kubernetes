@@ -176,7 +176,9 @@
 
     - name: Get detailed pod status
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} describe pod -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch | grep -A5 "Conditions:" || echo "No detailed conditions found"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          describe pod -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
+            | grep -A5 "Conditions:" || echo "No detailed conditions found"
       register: pod_conditions
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -205,7 +207,7 @@
         msg: "{{ cluster_health.stdout | default('Could not get cluster health') }}"
 
     - name: Set verification status with more flexible criteria
-      set_fact:
+      ansible.builtin.set_fact:
         elasticsearch_healthy: >-
           {{
             elasticsearch_cr_exists.rc == 0 and
@@ -226,6 +228,6 @@
           Secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else 'No' }}
 
     - name: Fail if Elasticsearch is not healthy (with override option)
-      fail:
+      ansible.builtin.fail:
         msg: Elasticsearch verification failed. See output above for details.
       when: not elasticsearch_healthy and (force_fail | default(true))

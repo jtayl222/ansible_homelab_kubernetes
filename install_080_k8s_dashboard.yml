@@ -42,7 +42,7 @@
 
       # Update the kubeconfig to use the control plane IP rather than localhost
     - name: Update kubeconfig to use control plane IP
-      replace:
+      ansible.builtin.replace:
         path: "{{ local_kubeconfig }}"
         regexp: https://127.0.0.1:6443
         replace: https://{{ node_ip }}:6443
@@ -51,7 +51,7 @@
 
       # Include the k8s_dashboard role with the proper kubeconfig
     - name: Install Kubernetes Dashboard via Helm
-      include_role:
+      ansible.builtin.include_role:
         name: k8s_dashboard
       vars:
         kubeconfig: "{{ local_kubeconfig }}"
@@ -111,7 +111,7 @@
 
       # Wait for token to be populated
     - name: Wait for token to be generated
-      command: >
+      ansible.builtin.command: >
         kubectl --kubeconfig={{ local_kubeconfig }} -n {{ dashboard_namespace }} \
           get secret dashboard-admin-token -o jsonpath='{.data.token}'
       register: token_check

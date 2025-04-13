@@ -59,7 +59,7 @@
           delegate_to: "{{ groups['utility'][0] }}"
 
         - name: Download CRDs
-          get_url:
+          ansible.builtin.get_url:
             url: https://raw.githubusercontent.com/traefik/traefik/v2.10/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
             dest: /tmp/traefik-crds.yaml
           when: "'NO_CRD' in crd_check.stdout"

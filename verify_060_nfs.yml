@@ -148,7 +148,7 @@
             containers:
               - name: nfs-test
                 image: nginx:alpine
-                command:
+                ansible.builtin.command:
                   - /bin/sh
                   - -c
                   - echo 'NFS test successful at $(date)' > /data/test-file.txt && sleep
@@ -233,7 +233,8 @@
         for node in $(kubectl --kubeconfig={{ kubeconfig_path }} \
           get nodes -o name | cut -d/ -f2); do
             echo "--- Node: $node ---"
-            kubectl --kubeconfig={{ kubeconfig_path }} debug node/$node --image=busybox -- chroot /host sh -c "dpkg -l | grep nfs-common || echo 'nfs-common not found'"
+            kubectl --kubeconfig={{ kubeconfig_path }} \
+              debug node/$node --image=busybox -- chroot /host sh -c "dpkg -l | grep nfs-common || echo 'nfs-common not found'"
           done
       register: nfs_client_check
       become: false
@@ -290,7 +291,7 @@
             containers:
               - name: nfs-test
                 image: nginx:alpine
-                command:
+                ansible.builtin.command:
                   - /bin/sh
                   - -c
                   - echo 'NFS test from second pod at $(date)' >> /data/test-file.txt &&

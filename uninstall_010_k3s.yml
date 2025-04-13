@@ -97,7 +97,7 @@
   gather_facts: true
   tasks:
     - name: Remove K3s data directories
-      ansible.builtin.file:
+      file:
         path: "{{ item }}"
         state: absent
       loop:
@@ -150,7 +150,7 @@
   gather_facts: false
   tasks:
     - name: Remove local kubeconfig and token files
-      ansible.builtin.file:
+      file:
         path: "{{ playbook_dir }}/fetched_tokens"
         state: absent
       ignore_errors: true

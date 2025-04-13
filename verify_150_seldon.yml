@@ -13,12 +13,12 @@
   tasks:
     # 1. Verify prerequisites
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: '{{ kubeconfig_path }}'
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.
       when: not kubeconfig_stat.stat.exists
@@ -38,7 +38,7 @@
         msg: "Seldon namespace: {{ 'Exists' if 'not found' not in seldon_ns_check.stdout
           else 'Not found - Seldon is not installed' }}"
     - name: Fail if Seldon is not installed
-      fail:
+      ansible.builtin.fail:
         msg: Seldon Core namespace not found. Please run install_150_seldon.yml first.
       when: "'not found' in seldon_ns_check.stdout"
 
@@ -57,7 +57,7 @@
         msg: >-
           Seldon Controller Manager:
           {{ 'Healthy (' + controller_status.stdout + ' replicas)'
-          if controller_status.rc == 0 and controller_status.stdout|int > 0
+          if controller_status.rc == 0 and controller_status.stdout | int > 0
           else 'Unhealthy or not found' }}
 
     # 4. Verify CRDs are installed
@@ -269,7 +269,7 @@
 
     # 17. Check if examples directory exists
     - name: Check for examples directory
-      stat:
+      ansible.builtin.stat:
         path: '{{ playbook_dir }}/seldon-examples'
       register: examples_dir
 
@@ -280,7 +280,7 @@
 
     # 18. Verify if test script exists
     - name: Check for test script
-      stat:
+      ansible.builtin.stat:
         path: '{{ playbook_dir }}/seldon-examples/test-iris-model.sh'
       register: test_script
 
@@ -301,10 +301,11 @@
       ansible.builtin.template:
         src: seldon_verification_summary.j2
         dest: '{{ playbook_dir }}/seldon-examples/verification_report.txt'
+        mode: '0644'  # Adding appropriate file permissions
       become: false
 
     - name: Display verification summary
-      command: cat "{{ playbook_dir }}/seldon-examples/verification_report.txt"
+      ansible.builtin.command: cat "{{ playbook_dir }}/seldon-examples/verification_report.txt"
       register: summary_output
       become: false
       changed_when: false

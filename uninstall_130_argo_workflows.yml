@@ -10,12 +10,12 @@
   tasks:
     # Check if kubeconfig exists
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with uninstallation.
       when: not kubeconfig_stat.stat.exists
 
@@ -201,7 +201,7 @@
       ansible.builtin.debug:
         msg: |-
           ==================== ARGO WORKFLOWS UNINSTALLATION SUMMARY ====================
-          Status: {{ 'Successfully uninstalled' if 'not found' in argo_ns.stdout or 'Namespace deleted successfully' in verify_ns_deleted.stdout 
+          Status: {{ 'Successfully uninstalled' if 'not found' in argo_ns.stdout or 'Namespace deleted successfully' in verify_ns_deleted.stdout
             else 'Uninstallation had issues - check output' }}
 
           Details:

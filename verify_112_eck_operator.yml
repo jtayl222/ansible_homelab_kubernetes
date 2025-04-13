@@ -38,7 +38,8 @@
 
     - name: Check ECK operator logs for errors
       ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} logs -l control-plane=elastic-operator --tail=20 | grep -i error || echo "No errors found in recent logs"
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} \
+          logs -l control-plane=elastic-operator --tail=20 | grep -i error || echo "No errors found in recent logs"
       register: operator_logs
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -76,13 +77,13 @@
             else 'ISSUES DETECTED' }}"
 
     - name: Set verification status
-      set_fact:
+      ansible.builtin.set_fact:
         operator_healthy:
           "{{ operator_namespace_exists.rc == 0 and operator_exists.rc
           == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
           }}"
 
     - name: Fail if operator is not healthy
-      fail:
+      ansible.builtin.fail:
         msg: ECK Operator verification failed. See output above for details.
       when: not operator_healthy

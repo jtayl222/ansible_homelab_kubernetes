@@ -3,7 +3,7 @@
   become: true
   tasks:
     - name: Install prerequisites
-      ansible.builtin.apt:
+      apt:
         name:
           - curl
           - apt-transport-https
@@ -11,7 +11,7 @@
         update_cache: yes
 
     - name: Install networking diagnostic utilities
-      ansible.builtin.apt:
+      apt:
         name:
           - net-tools
           - netcat-openbsd
@@ -25,13 +25,13 @@
       become: true
 
     - name: Download k3s install script
-      get_url:
+      ansible.builtin.get_url:
         url: https://get.k3s.io
         dest: /tmp/k3s-install.sh
         mode: "0755"
 
     - name: Install k3s control plane
-      command: /tmp/k3s-install.sh
+      ansible.builtin.command: /tmp/k3s-install.sh
       environment:
         INSTALL_K3S_EXEC: --datastore-endpoint='sqlite:///var/lib/rancher/k3s/server.db'
       args:
@@ -44,16 +44,17 @@
         state: started
 
     - name: Wait for k3s to be up and running
-      wait_for:
+      ansible.builtin.wait_for:
         port: 6443
         delay: 10
 
     - name: Get the node token from the control plane
-      command: cat /var/lib/rancher/k3s/server/node-token
+      ansible.builtin.command: cat /var/lib/rancher/k3s/server/node-token
       register: node_token
+      changed_when: false
 
     - name: Store node token
-      set_fact:
+      ansible.builtin.set_fact:
         k3s_token: "{{ node_token.stdout }}"
 
     - name: Display the node token

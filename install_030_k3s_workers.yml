@@ -9,12 +9,13 @@
         src: /var/lib/rancher/k3s/server/node-token
       register: node_token_b64
       delegate_to: "{{ control_node }}"
+    
     - name: Set k3s token fact
-      set_fact:
+      ansible.builtin.set_fact:
         k3s_token: "{{ node_token_b64['content'] | b64decode | trim }}"
 
     - name: Get control node IP
-      set_fact:
+      ansible.builtin.set_fact:
         control_node_ip:
           "{{
             hostvars[control_node]['ansible_host'] |
@@ -44,7 +45,7 @@
       become: true
 
     - name: Download k3s install script
-      get_url:
+      ansible.builtin.get_url:
         url: https://get.k3s.io
         dest: /tmp/k3s-install.sh
         mode: "0755"
@@ -60,16 +61,16 @@
 
     - name: Ensure k3s service is enabled and started
       ansible.builtin.systemd:
-        name: k3s-agent  # Changed to k3s-agent which is the worker node service name
+        name: k3s-agent  # Worker node service name
         enabled: yes
-        state: started
+        state: started  # Removed the 'ansible.builtin.' prefix
 
     - name: Wait for node to register
       ansible.builtin.pause:
         seconds: 10
 
     - name: Verify k3s worker node status (from control plane)
-      command: kubectl get nodes
+      ansible.builtin.command: kubectl get nodes
       register: nodes_status
       delegate_to: "{{ control_node }}"
       become: true

@@ -14,12 +14,12 @@
   tasks:
     # 1. Check if kubeconfig exists
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with verification.
       when: not kubeconfig_stat.stat.exists
 
@@ -33,7 +33,7 @@
       changed_when: false
 
     - name: Fail if Argo namespace doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Argo namespace not found. Please install Argo Workflows first.
       when: "'not found' in argo_ns.stdout"
 
@@ -122,21 +122,25 @@
 
       # 8. Check if Argo UI is accessible via NodePort
     - name: Test Argo UI via NodePort
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      ansible.builtin.uri:
+        url: "https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
       register: nodeport_access
-      become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
       # 9. Test Argo UI via Ingress
     - name: Test Argo UI via Ingress
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ argo_host }}/
+      ansible.builtin.uri:
+        url: "https://{{ argo_host }}/"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
       register: ingress_access
-      become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false
 
       # 10. Check if CRDs are installed
     - name: Check Argo Workflows CRDs
@@ -166,7 +170,7 @@
       become: false
       changed_when: false
       ignore_errors: true
-      when: nodeport_access.rc != 0
+      when: nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status != 200
 
     - name: Describe Argo Server service
       ansible.builtin.shell: |
@@ -175,7 +179,9 @@
       become: false
       changed_when: false
       ignore_errors: true
-      when: nodeport_access.rc != 0 or ingress_access.rc != 0
+      when: >
+        (nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status != 200) or 
+        (ingress_access is defined and ingress_access.status is defined and ingress_access.status != 200)
 
       # 13. Check network access with netcat
     - name: Check network connectivity to NodePort
@@ -185,7 +191,7 @@
       become: false
       changed_when: false
       ignore_errors: true
-      when: nodeport_access.rc != 0
+      when: nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status != 200
 
       # 14. Try to submit a test workflow
     - name: Submit test workflow if CRDs are ready
@@ -201,7 +207,7 @@
           - name: hello
             container:
               image: alpine:3.14
-              command: [echo, "Verification workflow submitted successfully"]
+              ansible.builtin.command: [echo, "Verification workflow submitted successfully"]
         EOF
       register: workflow_submit
       become: false
@@ -262,32 +268,28 @@
         msg:
           - ==================== ARGO WORKFLOWS VERIFICATION SUMMARY ====================
           - "Status Overview:"
-          - "- Argo Namespace: {{ 'Found' if 'not found' not in argo_ns.stdout else 'Not
-            found' }}"
-          - "- Argo Server: {{ 'Running (' + argo_server_replicas.stdout + ' replicas)'
-            if argo_server_replicas.stdout is defined and argo_server_replicas.stdout
-            != '0' else 'Not running' }}"
-          - "- Workflow Controller: {{ 'Running (' + argo_controller_replicas.stdout +
-            ' replicas)' if argo_controller_replicas.stdout is defined and argo_controller_replicas.stdout
-            != '0' else 'Not running' }}"
-          - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing'
-            }}"
+          - "- Argo Namespace: {{ 'Found' if 'not found' not in argo_ns.stdout else 'Not found' }}"
+          - "- Argo Server: {{ 'Running (' + argo_server_replicas.stdout + ' replicas)' 
+              if argo_server_replicas.stdout is defined and argo_server_replicas.stdout != '0' 
+              else 'Not running' }}"
+          - "- Workflow Controller: {{ 'Running (' + argo_controller_replicas.stdout + ' replicas)' 
+              if argo_controller_replicas.stdout is defined and argo_controller_replicas.stdout != '0' 
+              else 'Not running' }}"
+          - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing' }}"
           - ""
           - "Access Verification:"
-          - "- NodePort Service: {{ 'Available' if nodeport_services is defined and nodeport_services.stdout
-            | length > 0 else 'Not found' }}"
-          - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout
-            else 'Not found' }}"
-          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.stdout + ')'
-            if nodeport_access.rc == 0 else 'Not accessible' }}"
-          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.stdout + ')' if
-            ingress_access.rc == 0 else 'Not accessible' }}"
+          - "- NodePort Service: {{ 'Available' if nodeport_services is defined and nodeport_services.stdout | length > 0 else 'Not found' }}"
+          - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout else 'Not found' }}"
+          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.status|string + ')' 
+              if nodeport_access.status is defined and nodeport_access.status == 200 
+              else 'Not accessible' }}"
+          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.status|string + ')' 
+              if ingress_access.status is defined and ingress_access.status == 200 
+              else 'Not accessible' }}"
           - ""
           - "Resource Verification:"
-          - "- Example Template: {{ 'Found' if 'not found' not in template_check.stdout
-            else 'Not found' }}"
-          - "- Test Workflow Submission: {{ 'Successful' if workflow_submit.rc == 0 else
-            'Failed or skipped' }}"
+          - "- Example Template: {{ 'Found' if 'not found' not in template_check.stdout else 'Not found' }}"
+          - "- Test Workflow Submission: {{ 'Successful' if workflow_submit.rc == 0 else 'Failed or skipped' }}"
 
       # 17. Display pods status as separate debug task
     - name: Display Argo pod status
@@ -325,10 +327,8 @@
       # 20. Display network connectivity info
     - name: Display network connectivity information
       ansible.builtin.debug:
-        msg:
-          "Network Connectivity Test: {{ netcat_check.stdout | default('Not tested')
-          }}"
-      when: nodeport_access.rc != 0 and netcat_check is defined
+        msg: "Network Connectivity Test: {{ netcat_check.stdout | default('Not tested') }}"
+      when: nodeport_access.status is defined and nodeport_access.status != 200 and netcat_check is defined
 
       # 21. Display troubleshooting tips
     - name: Display troubleshooting tips
@@ -356,11 +356,11 @@
       # Add this at the end of the verification playbook
     - name: Ask if authentication should be fixed
       ansible.builtin.pause:
-        prompt:
+        prompt: |
           Would you like to patch Argo Server to use server-only authentication?
           (yes/no)
       register: fix_auth
-      when: nodeport_access.rc != 0 or ingress_access.rc != 0
+      when: nodeport_access.status is defined and nodeport_access.status != 200 or ingress_access.status is defined and ingress_access.status != 200
 
     - name: Patch Argo Server authentication if requested
       ansible.builtin.shell: |
@@ -417,21 +417,19 @@
       ignore_errors: true
 
     - name: Test access again after fix
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 https://{{ control_plane_ip }}:{{ argo_nodeport }}/
-      register: nodeport_access_after_fix
-      become: false
-      changed_when: false
-      when:
-        fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc
-        == 0
-      ignore_errors: true
+      ansible.builtin.uri:
+        url: "{{ item }}"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
+      register: access_after_fix
+      failed_when: false
+      loop:
+        - "https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+        - "https://{{ argo_host }}/"
 
     - name: Display results after fix
       ansible.builtin.debug:
-        msg:
-          "Access after fix: {{ 'Success (HTTP ' + nodeport_access_after_fix.stdout
-          + ')' if nodeport_access_after_fix.rc == 0 else 'Still not accessible' }}"
-      when:
-        fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc
-        == 0
+        msg: "Access after fix: {{ 'Success (HTTP ' + access_after_fix.results[0].status|string + ')' if access_after_fix.results[0].status is defined and access_after_fix.results[0].status == 200 else 'Still not accessible' }}"
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc == 0

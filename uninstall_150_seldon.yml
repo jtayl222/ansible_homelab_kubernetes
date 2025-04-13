@@ -9,12 +9,12 @@
   tasks:
     # 1. Check if kubeconfig exists
     - name: Ensure kubeconfig exists
-      stat:
+      ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
-      fail:
+      ansible.builtin.fail:
         msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with uninstallation.
       when: not kubeconfig_stat.stat.exists
 
@@ -218,9 +218,7 @@
       # Display uninstallation summary
     - name: Display uninstallation summary
       ansible.builtin.debug:
-        msg: "{{ uninstall_summary }}"
-      vars:
-        uninstall_summary: |-
+        msg: |-
           ==================== SELDON CORE UNINSTALLATION SUMMARY ====================
           Status: {% if 'not found' in seldon_ns.stdout or 'Namespace deleted successfully' in verify_ns_deleted.stdout %} \
           Successfully uninstalled{% else %}Uninstallation had issues - check output{% endif %}
@@ -229,7 +227,7 @@
           {% if 'not found' not in seldon_ns.stdout %}
           - Model Deployments Removed: {% if seldon_deployments_deleted is defined and seldon_deployments_deleted.rc == 0 %} \
           Success{% else %}Not applicable or failed{% endif %}
-          - Helm Release Deletion: {% if helm_uninstall is defined and helm_uninstall.status is defined and helm_uninstall.status is not none and helm_uninstall.status.status == 'UNINSTALLED' %}Success{% else %}Not applicable or failed{% endif %}
+          - Helm Release Deletion: {% if helm_success %}Success{% else %}Not applicable or failed{% endif %}
           - Services Deletion: {% if service_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
           - IngressRoutes Deletion: {% if ingress_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
           - Middleware Deletion: {% if middleware_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
