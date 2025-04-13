@@ -270,6 +270,8 @@
     - name: Restart Grafana pods to apply configuration
       ansible.builtin.shell: |
         kubectl --kubeconfig="{{ kubeconfig_path }}" rollout restart deployment {{ prometheus_release_name }}-grafana -n {{ prometheus_namespace }}
+      register: restart_result
+      changed_when: restart_result.rc == 0  # This will mark the task as changed when the command succeeds
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
@@ -304,9 +306,12 @@
 
     - name: Get Grafana admin password
       ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get secret -n {{ prometheus_namespace }} "{{ prometheus_release_name }}-grafana" \
           -o jsonpath="{.data.admin-password}" | base64 --decode
+      args:
+        executable: /bin/bash
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: grafana_password

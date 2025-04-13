@@ -58,6 +58,7 @@
     - name: Create additional dashboards ConfigMap
       ansible.builtin.copy:
         dest: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
+        mode: '0644'  # Add explicit file permissions
         content: |
           apiVersion: v1
           kind: ConfigMap
@@ -172,6 +173,7 @@
     - name: Create Custom Prometheus Rules
       ansible.builtin.copy:
         dest: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
+        mode: '0644'  # Add explicit file permissions
         content: |
           apiVersion: monitoring.coreos.com/v1
           kind: PrometheusRule
@@ -232,10 +234,13 @@
       changed_when: false
 
     - name: Get Grafana admin password
-      ansible.builtin.shell: >
+      ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
-          get secret -n {{ prometheus_namespace }} prometheus-grafana
+          get secret -n {{ prometheus_namespace }} prometheus-grafana \
           -o jsonpath="{.data.admin-password}" | base64 --decode
+      args:
+        executable: /bin/bash
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
       register: grafana_password

@@ -93,14 +93,17 @@
       changed_when: false
 
     - name: Check if Elasticsearch is accessible via NodePort (from outside)
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 \
-          https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
+      ansible.builtin.uri:
+        url: "https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}"
+        method: GET
+        return_content: false
+        validate_certs: false  # Equivalent to curl's -k option
+        status_code: [200, 201, 300, 301, 302, 303, 307, 308, 401, 403, 404, 500, 502, 503]  # Accept any status code
+        timeout: 5  # Equivalent to curl's --connect-timeout
       register: elasticsearch_nodeport_access
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
-      changed_when: false
+      failed_when: false  # Better practice than ignore_errors
       when: elasticsearch_nodeport.rc == 0
 
     - name: Verify Elasticsearch secrets
@@ -160,8 +163,8 @@
             0 else 'Not configured' }}"
           - "Internal cluster access: {{ elasticsearch_internal_access.stdout if elasticsearch_internal_access.rc
             == 0 else 'Failed' }}"
-          - "External NodePort access: {{ elasticsearch_nodeport_access.stdout if elasticsearch_nodeport_access
-            is defined and elasticsearch_nodeport_access.rc == 0 else 'Not tested' }}"
+          - "External NodePort access: {{ elasticsearch_nodeport_access.status | default('Not tested')
+            if elasticsearch_nodeport_access is defined else 'Not tested' }}"
           - "Elastic user secret exists: {{ 'Yes' if elasticsearch_secret.rc == 0 else
             'No' }}"
           - "Internal authentication check: {{ elasticsearch_internal_auth.stdout if elasticsearch_internal_auth.rc

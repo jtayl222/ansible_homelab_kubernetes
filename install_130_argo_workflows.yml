@@ -474,14 +474,17 @@
       block:
         - name: Scale down deployments
           ansible.builtin.shell: |
-            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=0
-            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment workflow-controller --replicas=0
-            echo "Scaled down deployments"
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
+              scale deployment --all --replicas=0
           register: scale_down
+          delegate_to: "{{ groups['utility'][0] }}"
           become: false
+          changed_when: scale_down.rc == 0  # This does change state when successful
+          ignore_errors: true
 
         - name: Wait for pods to terminate
           ansible.builtin.shell: |
+            set -o pipefail  # Add this line
             echo "Waiting for pods to terminate..."
             for i in $(seq 1 15); do
               if [ $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
@@ -495,12 +498,15 @@
             done
             echo "WARNING: Not all pods terminated after timeout"
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods
+          args:
+            executable: /bin/bash  # Add this line
           register: termination_wait
           become: false
           changed_when: false
 
         - name: Check for remaining pods and force delete if necessary
           ansible.builtin.shell: |
+            set -o pipefail  # Add this line
             PODS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -o name)
             if [ -n "$PODS" ]; then
               echo "Force deleting remaining pods: $PODS"
@@ -509,6 +515,8 @@
             else
               echo "No pods remaining"
             fi
+          args:
+            executable: /bin/bash  # Add this line
           register: force_delete
           become: false
           changed_when: "'Force deleting' in force_delete.stdout"
@@ -545,6 +553,7 @@
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=1
           register: scale_up
           become: false
+          changed_when: scale_up.rc == 0  # Add this line to indicate when it changes state
       rescue:
         - name: Display error message for restart failures
           ansible.builtin.debug:
@@ -555,8 +564,10 @@
       ansible.builtin.shell: |
         echo "Checking workflow-controller status..."
         for i in $(seq 1 30); do
-          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-            get deployment workflow-controller -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} \
+            -n {{ argo_namespace }} \
+            get deployment workflow-controller \
+            -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
           READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
             get deployment workflow-controller -o jsonpath='{.status.readyReplicas}')
 
@@ -603,10 +614,11 @@
       ansible.builtin.shell: |
         echo "Checking argo-server status..."
         for i in $(seq 1 30); do
-          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-            et deployment argo-server -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
-          READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-            get deployment argo-server -o jsonpath='{.status.readyReplicas}')
+          STATUS=$(kubectl --kubeconfig={{ kubeconfig_path }} \
+            -n {{ argo_namespace }} \
+            get deployment argo-server \
+            -o jsonpath='{.status.conditions[?(@.type=="Available")].status}')
+          READY=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get deployment argo-server -o jsonpath='{.status.readyReplicas}')
 
           if [ "$STATUS" = "True" ] && [ "$READY" = "1" ]; then
             echo "argo-server deployment is ready"
@@ -615,13 +627,11 @@
 
           echo "Attempt $i: argo-server not ready yet. Status: $STATUS, Ready: $READY"
           echo "Pod details:"
-          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-            get pods -l app=argo-server -o wide
+          kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o wide
 
           if [ "$i" = "10" ] || [ "$i" = "20" ]; then
             echo "Checking pod events:"
-            POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-              get pods -l app=argo-server -o name | head -1)
+            POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
             if [ -n "$POD" ]; then
               kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD | grep -A 10 "Events:"
               echo "Checking pod logs:"
@@ -633,8 +643,7 @@
         done
 
         echo "ERROR: Timed out waiting for argo-server deployment"
-        POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} \
-          get pods -l app=argo-server -o name | head -1)
+        POD=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods -l app=argo-server -o name | head -1)
         if [ -n "$POD" ]; then
           echo "Final pod status:"
           kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} describe $POD
@@ -665,8 +674,8 @@
       ansible.builtin.debug:
         msg:
           - "==================== ARGO DEPLOYMENT STATUS ===================="
-          - "Workflow Controller: {{ 'READY' if controller_status.rc|default(1) == 0 else 'NOT READY' }}"
-          - "Argo Server: {{ 'READY' if server_status.rc|default(1) == 0 else 'NOT READY' }}"
+          - "Workflow Controller: {{ 'READY' if controller_status.rc | default(1) == 0 else 'NOT READY' }}"
+          - "Argo Server: {{ 'READY' if server_status.rc | default(1) == 0 else 'NOT READY' }}"
           - "See complete logs for debugging information"
           - "=============================================================="
 
@@ -774,11 +783,15 @@
 
     # 20. Test Argo UI access via NodePort
     - name: Test Argo UI access via NodePort
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" https://{{ control_plane_ip }}:{{ argo_nodeport }}/
+      ansible.builtin.uri:
+        url: "https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+        method: GET
+        return_content: false
+        status_code: [200, 301, 302, 401, 403]  # Accept various common status codes as success
+        validate_certs: false  # Since we're using self-signed certificates
+        timeout: 10
       register: argo_ui_access
       become: false
-      changed_when: false
       ignore_errors: true
 
     # 21. Variables for Argo Workflows installation summary

@@ -48,7 +48,7 @@
       register: worker_ports
 
     - name: Port check summary
-      ansible.builtin.ansible.builtin.debug:
+      ansible.builtin.debug:
         msg: |
           Port check results for {{ inventory_hostname }}:
           {% if 'k3s_control_plane' in group_names %}
@@ -74,14 +74,14 @@
         - br_netfilter
 
     - name: Load required kernel modules
-      ansible.builtin.modprobe:
+      community.general.modprobe:
         name: "{{ item.item }}"
         state: present
       loop: "{{ kernel_modules.results }}"
       when: item.rc != 0
 
     - name: Enable IP forwarding
-      ansible.builtin.sysctl:
+      ansible.posix.sysctl:
         name: net.ipv4.ip_forward
         value: "1"
         state: present
@@ -116,7 +116,7 @@
       register: connectivity
 
     - name: Connectivity summary
-      ansible.builtin.ansible.builtin.debug:
+      ansible.builtin.debug:
         msg: |
           Connectivity results for {{ inventory_hostname }}:
           {% for result in connectivity.results %}
@@ -124,12 +124,16 @@
           {% endfor %}
 
     - name: Check disk space for Kubernetes
-      ansible.builtin.shell: df -h / | awk 'NR==2 {print $4}'
+      ansible.builtin.shell: |
+        set -o pipefail
+        df -h / | awk 'NR==2 {print $4}'
+      args:
+        executable: /bin/bash
       register: available_disk
       changed_when: false
 
     - name: Report disk space
-      ansible.builtin.ansible.builtin.debug:
+      ansible.builtin.debug:
         msg: "Available disk space on /: {{ available_disk.stdout }}"
 
     - name: Ensure swap is disabled for Kubernetes

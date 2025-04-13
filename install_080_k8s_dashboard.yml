@@ -32,11 +32,13 @@
         sudo cat /etc/rancher/k3s/k3s.yaml > /tmp/k3s.yaml && cat /tmp/k3s.yaml
         && rm /tmp/k3s.yaml
       register: kubeconfig_content
+      changed_when: false  # This task only fetches data, it doesn't make changes
 
     - name: Write kubeconfig to local file
       ansible.builtin.copy:
         content: "{{ kubeconfig_content.stdout }}"
         dest: "{{ local_kubeconfig }}"
+        mode: '0600'  # Restricted permissions for security
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
@@ -54,8 +56,8 @@
       ansible.builtin.include_role:
         name: k8s_dashboard
       vars:
-        kubeconfig: "{{ local_kubeconfig }}"
-        utility_host: "{{ groups['utility'][0] }}"
+        k8s_dashboard_kubeconfig: "{{ local_kubeconfig }}"
+        k8s_dashboard_utility_host: "{{ groups['utility'][0] }}"
       when: dashboard_enabled
 
       # Create service account and permissions
@@ -118,15 +120,20 @@
       until: token_check.stdout != ""
       retries: 10
       delay: 5
+      changed_when: false  # This is just checking status, not changing anything
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 
       # Extract token using the local kubeconfig
     - name: Extract dashboard admin token
-      ansible.builtin.shell: >
+      ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig={{ local_kubeconfig }} -n kubernetes-dashboard \
-        get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
+          get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
+      args:
+        executable: /bin/bash
       register: dashboard_token
+      changed_when: false  # This task only reads data, doesn't make changes
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
 

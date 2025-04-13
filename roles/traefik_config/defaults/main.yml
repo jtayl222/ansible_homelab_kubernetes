@@ -1,6 +1,0 @@
-# Traefik configuration
-traefik_namespace: kube-system
-traefik_expose_dashboard: true
-traefik_dashboard_path: /dashboard
-kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
-kubeconfig_local: false  # Set to true if kubeconfig already exists locally

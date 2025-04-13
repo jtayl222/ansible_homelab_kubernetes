@@ -67,8 +67,8 @@
         - result.rc != 0
         - "'not found' not in result.stderr"
       when: >
-        mlflow_deployment_check is defined and 
-        mlflow_deployment_check.stdout is defined and 
+        mlflow_deployment_check is defined and
+        mlflow_deployment_check.stdout is defined and
         'not found' not in mlflow_deployment_check.stdout
 
       # Create namespace if needed

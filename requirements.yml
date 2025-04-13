@@ -1,0 +1,12 @@
+---
+collections:
+  - name: ansible.posix
+    version: ">=1.4.0"
+  - name: community.general
+    version: ">=2.0.0"
+  - name: kubernetes.core
+    version: ">=2.0.0"
+  - name: community.kubernetes
+    version: ">=2.0.0"
+  - name: ansible.utils
+    version: ">=2.0.0"

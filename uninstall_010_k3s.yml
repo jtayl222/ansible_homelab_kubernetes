@@ -26,6 +26,8 @@
           ansible.builtin.command: helm uninstall grafana -n monitoring
           environment:
             KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          register: grafana_uninstall
+          changed_when: grafana_uninstall.rc == 0
           failed_when: false
           when: helm_releases.stdout is search('grafana')
 
@@ -33,6 +35,8 @@
           ansible.builtin.command: helm uninstall prometheus -n monitoring
           environment:
             KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+          register: prometheus_uninstall
+          changed_when: prometheus_uninstall.rc == 0
           failed_when: false
           when: helm_releases.stdout is search('prometheus')
 
@@ -58,7 +62,8 @@
             name: k3s-agent
             state: stopped
             enabled: false
-          ignore_errors: true
+          register: k3s_agent_stop
+          failed_when: false
 
         - name: Run K3s agent uninstall script
           ansible.builtin.command: /usr/local/bin/k3s-agent-uninstall.sh
@@ -83,7 +88,8 @@
             name: k3s
             state: stopped
             enabled: false
-          ignore_errors: true
+          register: k3s_stop
+          failed_when: false
 
         - name: Run K3s uninstall script
           ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
@@ -97,7 +103,7 @@
   gather_facts: true
   tasks:
     - name: Remove K3s data directories
-      file:
+      ansible.builtin.file:
         path: "{{ item }}"
         state: absent
       loop:
@@ -109,7 +115,8 @@
         - /etc/cni
         - /opt/cni
         - /var/run/calico
-      ignore_errors: true
+      register: remove_dirs
+      failed_when: false
 
     - name: Remove CNI interfaces
       ansible.builtin.command: ip link delete {{ item }}
@@ -127,21 +134,22 @@
         iptables -F
         iptables -t nat -F
         iptables -t mangle -F
-      changed_when: true
-      ignore_errors: true
+      register: iptables_clear
+      changed_when: iptables_clear.rc == 0
+      failed_when: false
 
     - name: Restart Docker service if exists
       ansible.builtin.systemd:
         name: docker
         state: restarted
-      ignore_errors: true
+      register: restart_docker
       failed_when: false
 
     - name: Restart Containerd service if exists
       ansible.builtin.systemd:
         name: containerd
         state: restarted
-      ignore_errors: true
+      register: restart_containerd
       failed_when: false
 
 - name: Clean up local files
@@ -150,7 +158,8 @@
   gather_facts: false
   tasks:
     - name: Remove local kubeconfig and token files
-      file:
+      ansible.builtin.file:
         path: "{{ playbook_dir }}/fetched_tokens"
         state: absent
-      ignore_errors: true
+      register: remove_local_files
+      failed_when: false

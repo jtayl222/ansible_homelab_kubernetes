@@ -44,7 +44,7 @@
   become: false
   register: repo_add_result
   changed_when: "'has been added' in repo_add_result.stdout"
-  failed_when: 
+  failed_when:
     - repo_add_result.rc != 0
     - "'already exists' not in repo_add_result.stderr"
 
@@ -118,7 +118,7 @@
 
 - name: Wait for token to be generated
   ansible.builtin.command: >
-    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard 
+    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard
       get secret dashboard-admin-token
       -o jsonpath='{.data.token}'
   register: token_check

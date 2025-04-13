@@ -180,7 +180,7 @@
       changed_when: false
       ignore_errors: true
       when: >
-        (nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status != 200) or 
+        (nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status != 200) or
         (ingress_access is defined and ingress_access.status is defined and ingress_access.status != 200)
 
       # 13. Check network access with netcat
@@ -269,22 +269,22 @@
           - ==================== ARGO WORKFLOWS VERIFICATION SUMMARY ====================
           - "Status Overview:"
           - "- Argo Namespace: {{ 'Found' if 'not found' not in argo_ns.stdout else 'Not found' }}"
-          - "- Argo Server: {{ 'Running (' + argo_server_replicas.stdout + ' replicas)' 
-              if argo_server_replicas.stdout is defined and argo_server_replicas.stdout != '0' 
+          - "- Argo Server: {{ 'Running (' + argo_server_replicas.stdout + ' replicas)'
+              if argo_server_replicas.stdout is defined and argo_server_replicas.stdout != '0'
               else 'Not running' }}"
-          - "- Workflow Controller: {{ 'Running (' + argo_controller_replicas.stdout + ' replicas)' 
-              if argo_controller_replicas.stdout is defined and argo_controller_replicas.stdout != '0' 
+          - "- Workflow Controller: {{ 'Running (' + argo_controller_replicas.stdout + ' replicas)'
+              if argo_controller_replicas.stdout is defined and argo_controller_replicas.stdout != '0'
               else 'Not running' }}"
           - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing' }}"
           - ""
           - "Access Verification:"
           - "- NodePort Service: {{ 'Available' if nodeport_services is defined and nodeport_services.stdout | length > 0 else 'Not found' }}"
           - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout else 'Not found' }}"
-          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.status|string + ')' 
-              if nodeport_access.status is defined and nodeport_access.status == 200 
+          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.status | string + ')'
+              if nodeport_access.status is defined and nodeport_access.status == 200
               else 'Not accessible' }}"
-          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.status|string + ')' 
-              if ingress_access.status is defined and ingress_access.status == 200 
+          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.status | string + ')'
+              if ingress_access.status is defined and ingress_access.status == 200
               else 'Not accessible' }}"
           - ""
           - "Resource Verification:"
@@ -339,8 +339,8 @@
           - "- If CRDs are missing, the controller may not have completed installation"
           - "- Look at pod logs for detailed error messages"
           - "- Ensure NodePort service selector matches the pod labels"
-          - "- For manual fixes, SSH into the control plane and check logs with: kubectl
-            -n {{ argo_namespace }} logs deployment/argo-server"
+          - "- For manual fixes, SSH into the control plane and check logs with:"
+          - "  kubectl -n {{ argo_namespace }} logs deployment/argo-server"
           - "- If verification failed, try reinstalling with: ansible-playbook -i inventory/hosts
             install_130_argo_workflows.yml"
 
@@ -431,5 +431,8 @@
 
     - name: Display results after fix
       ansible.builtin.debug:
-        msg: "Access after fix: {{ 'Success (HTTP ' + access_after_fix.results[0].status|string + ')' if access_after_fix.results[0].status is defined and access_after_fix.results[0].status == 200 else 'Still not accessible' }}"
+        msg: >-
+          Access after fix: {{ 'Success (HTTP ' + access_after_fix.results[0].status | string + ')'
+          if access_after_fix.results[0].status is defined and access_after_fix.results[0].status == 200
+          else 'Still not accessible' }}
       when: fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc == 0

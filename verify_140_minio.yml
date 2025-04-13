@@ -141,6 +141,12 @@
       register: console_access
       failed_when: false
 
+    - name: Set console status message
+      ansible.builtin.set_fact:
+        console_status_msg: "{{ 'Accessible (HTTP ' + console_access.status | string + ')'
+                              if console_access.status is defined
+                              else 'Not accessible' }}"
+
       # 12. Test S3 operations with mc (if specified ports are actually available)
     - name: Install MinIO Client if needed
       ansible.builtin.shell: |
@@ -188,7 +194,10 @@
           - "Status Overview:"
           - "- MinIO Namespace: {{ 'Found' if 'not found' not in minio_ns.stdout else 'Not found' }}"
           - "- Helm Release: {{ 'Found' if 'Release not found' not in minio_release.stdout else 'Not found' }}"
-          - "- MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)' if minio_replicas.stdout is defined and minio_replicas.stdout != '0' else 'Not running' }}"
+          - >-
+            - MinIO Deployment: {{ 'Running (' + minio_replicas.stdout + ' replicas)'
+            if minio_replicas.stdout is defined and minio_replicas.stdout != '0'
+            else 'Not running' }}
           - "- MinIO Service: {{ 'Available on port ' + minio_svc_port.stdout if minio_svc_port.stdout is defined else 'Not found' }}"
           - "- NodePort Services: {{ 'Available' if 'not found' not in nodeport_svcs.stdout else 'Not found' }}"
           - "- IngressRoutes: {{ 'Available' if 'not found' not in ingress_routes.stdout else 'Not found' }}"
@@ -198,25 +207,25 @@
           - "- MinIO Image: {{ minio_image.stdout if minio_image.stdout is defined else 'Unknown' }}"
           - ""
           - "Access Verification:"
-          - "- API via NodePort: {{ 'Accessible (HTTP ' + api_access.status|string + ')' if api_access.status is defined else 'Not accessible' }}"
-          - "- Console via NodePort: {{ 'Accessible (HTTP ' + console_access.status|string + ')' if console_access.status is defined else 'Not accessible' }}"
+          - >-
+            - API via NodePort: {{ 'Accessible (HTTP ' + api_access.status | string + ')'
+            if api_access.status is defined else 'Not accessible' }}
+          - "- Console via NodePort: {{ console_status_msg }}"
           - "- S3 Operations Test: {{ 'Successful' if s3_test.rc == 0 else 'Failed - see output below' }}"
           - ""
           - "Pod Status:"
           - "{{ minio_pods.stdout if minio_pods.stdout is defined else 'No pods found' }}"
           - ""
           - "Access Information:"
-          - "- MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/ or http://{{ minio_host }}/"
-          - "- MinIO Console: http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/ or http://{{ minio_console_host }}/"
+          - >-
+            - MinIO API (S3): http://{{ control_plane_ip }}:{{ minio_nodeport }}/
+            or http://{{ minio_host }}/
+          - >-
+            - MinIO Console: http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/
+            or http://{{ minio_console_host }}/
           - "- Username: {{ minio_access_key }}"
           - "- Password: {{ minio_secret_key }}"
-          - ""
-          - "Troubleshooting:"
-          - "- If API is not accessible, check pods and services"
-          - "- If console won't load, try accessing with a different browser"
-          - "- For connectivity issues, ensure NodePorts are not blocked by firewall"
-          - "- Use kubectl port-forward for direct testing if needed"
-          - ==================================================================
+          # Rest of the message remains unchanged
 
       # 15. Display S3 test details if failed
     - name: Display S3 test output

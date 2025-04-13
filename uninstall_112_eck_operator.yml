@@ -17,16 +17,24 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/operator.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+        register: remove_operator_result
+        delegate_to: "{{ groups['utility'][0] }}"
+        become: false
+        failed_when:
+          - remove_operator_result.failed is defined
+          - remove_operator_result.failed
+          - not (
+              remove_operator_result.msg | default('') is search('not found') or
+              remove_operator_result.msg | default('') is search('NotFound') or
+              remove_operator_result.msg | default('') is search('does not exist')
+            )
 
     - name: Wait for ECK operator to be deleted
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} \
           get statefulset 2>&1 | grep -c "No resources found" || true
       register: operator_deleted
-      until: operator_deleted.stdout|int > 0 or operator_deleted.rc != 0
+      until: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
       retries: 10
       delay: 10
       delegate_to: "{{ groups['utility'][0] }}"
@@ -40,9 +48,17 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/crds.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-      ignore_errors: true
+        register: remove_crds_result
+        delegate_to: "{{ groups['utility'][0] }}"
+        become: false
+        failed_when:
+          - remove_crds_result.failed is defined
+          - remove_crds_result.failed
+          - not (
+              remove_crds_result.msg | default('') is search('not found') or
+              remove_crds_result.msg | default('') is search('NotFound') or
+              remove_crds_result.msg | default('') is search('does not exist')
+            )
 
     - name: Remove elastic namespace
       kubernetes.core.k8s:
@@ -53,9 +69,17 @@
           kind: Namespace
           metadata:
             name: "{{ elastic_namespace }}"
+      register: remove_elastic_ns_result
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      failed_when:
+        - remove_elastic_ns_result.failed is defined
+        - remove_elastic_ns_result.failed
+        - not (
+            remove_elastic_ns_result.msg | default('') is search('not found') or
+            remove_elastic_ns_result.msg | default('') is search('NotFound') or
+            remove_elastic_ns_result.msg | default('') is search('does not exist')
+          )
 
     - name: Remove operator namespace
       kubernetes.core.k8s:
@@ -66,10 +90,18 @@
           kind: Namespace
           metadata:
             name: "{{ operator_namespace }}"
+      register: remove_operator_ns_result
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
-      when: operator_deleted.stdout|int > 0 or operator_deleted.rc != 0
+      failed_when:
+        - remove_operator_ns_result.failed is defined
+        - remove_operator_ns_result.failed
+        - not (
+            remove_operator_ns_result.msg | default('') is search('not found') or
+            remove_operator_ns_result.msg | default('') is search('NotFound') or
+            remove_operator_ns_result.msg | default('') is search('does not exist')
+          )
+      when: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
 
     - name: Display cleanup completion message
       ansible.builtin.debug:

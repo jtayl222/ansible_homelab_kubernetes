@@ -51,9 +51,11 @@
     - name: Ensure Traefik CRDs exist
       block:
         - name: Check for Traefik CRDs
-          ansible.builtin.shell: >
-            kubectl --kubeconfig={{ kubeconfig_path }} \
-              get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
+          ansible.builtin.shell: |
+            set -o pipefail
+            kubectl --kubeconfig={{ kubeconfig_path }} get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
+          args:
+            executable: /bin/bash  # Add this line to specify bash shell
           register: crd_check
           changed_when: false
           delegate_to: "{{ groups['utility'][0] }}"
@@ -62,6 +64,7 @@
           ansible.builtin.get_url:
             url: https://raw.githubusercontent.com/traefik/traefik/v2.10/docs/content/reference/dynamic-configuration/kubernetes-crd-definition-v1.yml
             dest: /tmp/traefik-crds.yaml
+            mode: '0644'
           when: "'NO_CRD' in crd_check.stdout"
           delegate_to: "{{ groups['utility'][0] }}"
 
@@ -101,11 +104,14 @@
                 websecure:
                   tls:
                     enabled: false
+        mode: '0644'
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply HelmChartConfig
       ansible.builtin.shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-helm-config.yaml
+      register: apply_helm_config
+      changed_when: apply_helm_config.stdout is search('created|configured')
       delegate_to: "{{ groups['utility'][0] }}"
 
     # SECTION: AUTHENTICATION - Set up authentication for dashboard
@@ -122,11 +128,14 @@
           stringData:
             # Updated using: htpasswd -nb admin admin
             users: "admin:$apr1$QER2W2Ka$avgZMvXUgMlrFgg4tCJDW0"
+        mode: '0644'
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply basic auth secret
       ansible.builtin.shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-auth-secret.yaml
+      register: apply_auth_secret
+      changed_when: apply_auth_secret.stdout is search('created|configured')
       delegate_to: "{{ groups['utility'][0] }}"
 
     # SECTION: MIDDLEWARES - Create required middlewares for proper routing
@@ -143,11 +152,14 @@
             basicAuth:
               secret: traefik-dashboard-auth
               realm: "Traefik Dashboard"
+        mode: '0644'
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply auth middleware
       ansible.builtin.shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-middleware.yaml
+      register: apply_auth_middleware
+      changed_when: apply_auth_middleware.stdout is search('created|configured')
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create strip prefix middleware
@@ -164,11 +176,14 @@
               prefixes:
                 - /dashboard
               forceSlash: true
+        mode: '0644'
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply strip prefix middleware
       ansible.builtin.shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/traefik-strip-prefix.yaml
+      register: apply_strip_prefix
+      changed_when: apply_strip_prefix.stdout is search('created|configured')
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Create proxy middleware for API
@@ -298,41 +313,43 @@
           ansible.builtin.shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} rollout restart deployment traefik
             -n {{ traefik_namespace }}
+          register: rollout_restart
+          changed_when: rollout_restart.rc == 0
           delegate_to: "{{ groups['utility'][0] }}"
 
         - name: Wait for Traefik to be ready
           ansible.builtin.shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik
             -n {{ traefik_namespace }} --timeout=60s
+          register: traefik_ready
+          changed_when: false
           delegate_to: "{{ groups['utility'][0] }}"
       rescue:
         - name: Show deployment state
           ansible.builtin.shell: >
             kubectl --kubeconfig={{ kubeconfig_path }} \
-              get deployment traefik -n {{ traefik_namespace
-            }}
+              get deployment traefik -n {{ traefik_namespace }}
           delegate_to: "{{ groups['utility'][0] }}"
           register: deployment_check
+          changed_when: false
 
-        - name: Display partial state
-          ansible.builtin.debug:
-            msg:
-              "Traefik deployment timed out. Current: {{ deployment_check.stdout_lines
-              }}"
+        - name: Force restart Traefik pods
+          ansible.builtin.shell: |
+            kubectl --kubeconfig={{ kubeconfig_path }} -n {{ traefik_namespace }} \
+              delete pods -l app.kubernetes.io/name=traefik
+          register: force_restart
+          changed_when: force_restart.rc == 0
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
 
-    - name: Force restart Traefik pods
-      ansible.builtin.shell: |
-        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ traefik_namespace }} \
-          delete pods -l app.kubernetes.io/name=traefik
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
-
-    - name: Wait for Traefik to be ready
-      ansible.builtin.shell: >
-        kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik
-        -n {{ traefik_namespace }} --timeout=60s
-      delegate_to: "{{ groups['utility'][0] }}"
-      become: false
+        - name: Wait for Traefik to be ready
+          ansible.builtin.shell: >
+            kubectl --kubeconfig={{ kubeconfig_path }} rollout status deployment traefik
+            -n {{ traefik_namespace }} --timeout=60s
+          register: traefik_ready_again
+          changed_when: false
+          delegate_to: "{{ groups['utility'][0] }}"
+          become: false
 
     # SECTION: DASHBOARD ACCESS - Create local access script
     - name: Pause for changes
@@ -455,9 +472,12 @@
                 services:
                   - name: whoami
                     port: 80
+        mode: '0644'
       delegate_to: "{{ groups['utility'][0] }}"
 
     - name: Apply whoami test
       ansible.builtin.shell: >
         kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/whoami-test.yaml
+      register: apply_whoami
+      changed_when: apply_whoami.stdout is search('created|configured')
       delegate_to: "{{ groups['utility'][0] }}"

@@ -168,16 +168,30 @@
       ansible.builtin.debug:
         msg: |-
           ==================== MINIO UNINSTALLATION SUMMARY ====================
-          Status: {% if 'not found' in minio_ns.stdout or 'Namespace deleted successfully' in verify_ns_deleted.stdout %}Successfully uninstalled{% else %}Uninstallation had issues - check output{% endif %}
+          Status: {% if 'not found' in minio_ns.stdout
+          or 'Namespace deleted successfully' in verify_ns_deleted.stdout %}Successfully uninstalled{% else %}
+          Uninstallation had issues - check output{% endif %}
 
           Details:
           {% if 'not found' not in minio_ns.stdout %}
-          - Helm Release Deletion: {% if helm_uninstall is defined and helm_uninstall.status is defined and helm_uninstall.status.status == 'UNINSTALLED' %}Success{% else %}Not applicable or failed{% endif %}
+          - Helm Release Deletion: >-
+            {%- if helm_uninstall is defined and
+                helm_uninstall.status is defined and
+                helm_uninstall.status.status == 'UNINSTALLED' -%}
+            Success
+            {%- else -%}
+            Not applicable or failed
+            {%- endif -%}
           - Services Deletion: {% if service_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
           - IngressRoutes Deletion: {% if ingress_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
           - PVC Deletion: {% if pvc_deleted is defined and pvc_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
           - Remaining Resource Cleanup: {% if all_deleted.rc == 0 %}Success{% else %}Failed or not found{% endif %}
-          - Namespace Deletion: {% if namespace_deleted.rc == 0 %}Success{% else %}Failed - may need manual cleanup{% endif %}
+          - Namespace Deletion: >-
+            {%- if namespace_deleted.rc == 0 -%}
+            Success
+            {%- else -%}
+            Failed - may need manual cleanup
+            {%- endif -%}
           {% else %}
           - No MinIO installation found
           {% endif %}
@@ -186,5 +200,7 @@
           - If any resources couldn't be deleted, you may need to manually clean them up
           - If namespace is stuck in 'Terminating' state, check for finalizers with:
             kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ minio_namespace }} -o yaml
-          - To remove finalizers: kubectl --kubeconfig={{ kubeconfig_path }} patch namespace {{ minio_namespace }} -p '{"metadata":{"finalizers":[]}}' --type=merge
+          - To remove finalizers: >-
+            kubectl --kubeconfig={{ kubeconfig_path }} patch namespace {{ minio_namespace }}
+            -p '{"metadata":{"finalizers":[]}}' --type=merge
           ==================================================================

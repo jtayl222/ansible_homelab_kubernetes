@@ -88,8 +88,11 @@
 
     - name: Get elastic user password
       ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
+      args:
+        executable: /bin/bash
       register: elastic_password
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
@@ -107,6 +110,7 @@
       delay: 5
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+      changed_when: false  # This command doesn't change anything, it just retrieves info
 
     - name: Store kibana_system password in a secret
       kubernetes.core.k8s:
@@ -133,6 +137,7 @@
       register: kibana_role_check
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+      changed_when: false  # This is just a check, it doesn't change anything
       ignore_errors: true
 
     - name: Create kibana_system role if missing
@@ -164,6 +169,7 @@
       register: kibana_role_create
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+      changed_when: kibana_role_create.rc == 0 and "error" not in kibana_role_create.stdout
       when: "'kibana_system' not in kibana_role_check.stdout"
       ignore_errors: true
 
@@ -184,17 +190,22 @@
       register: kibana_user_create
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+      changed_when: kibana_user_create.rc == 0 and "error" not in kibana_user_create.stdout
       ignore_errors: true
 
     - name: Test kibana_system user authentication
       ansible.builtin.shell: |
+        set -o pipefail  # Also fixing the pipe issue
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           exec {{ es_pod_name.stdout }} -- \
             curl -sv -k -u "kibana_system:{{ kibana_password }}" \
               "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
+      args:
+        executable: /bin/bash
       register: kibana_auth_test
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
+      changed_when: false  # This is just a test/verification, it doesn't change state
       ignore_errors: true
 
     - name: Display installation information

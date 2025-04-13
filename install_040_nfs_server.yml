@@ -66,10 +66,15 @@
       ansible.builtin.systemd:
         name: "{{ item }}"
         state: stopped
+      register: service_stop
+      failed_when:
+        - service_stop.failed is defined
+        - service_stop.failed
+        - "'could not find the requested service' not in service_stop.msg | default('')"
+        - "'not loaded' not in service_stop.msg | default('')"
       loop:
         - nfs-server
         - rpcbind
-      ignore_errors: true
 
     - name: Reload systemd daemon
       ansible.builtin.systemd:
@@ -84,6 +89,8 @@
 
     - name: Apply NFS exports
       ansible.builtin.command: exportfs -ra
+      register: export_result
+      changed_when: export_result.rc == 0  # This command modifies state when successful
       when: exports_file.changed or rpcbind_started.changed
 
     - name: Ensure NFS server is started
@@ -95,13 +102,17 @@
 
       # Simple portable network verification - check if ports are listening
     - name: Verify NFS ports are open
-      ansible.builtin.shell: ss -tuln | grep -E '(111|2049)'
+      ansible.builtin.shell: |
+        set -o pipefail
+        ss -tuln | grep -E '(111|2049)'
+      args:
+        executable: /bin/bash
       register: nfs_ports
       failed_when: nfs_ports.rc != 0
       changed_when: false
 
     - name: Verify exports are available
-      ansible.builtin.shell: showmount -e localhost
+      ansible.builtin.command: showmount -e localhost
       register: nfs_exports
       failed_when: nfs_exports.rc != 0
       changed_when: false

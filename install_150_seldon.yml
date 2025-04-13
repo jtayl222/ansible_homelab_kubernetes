@@ -83,7 +83,7 @@
       delay: 10
       when:
         - seldon_deploy is defined
-        - seldon_deploy.changed == true
+        - seldon_deploy.changed
       until: seldon_crd_ready is succeeded
 
     - name: Wait for Seldon CRDs to be fully established (additional check)

@@ -101,13 +101,17 @@
       changed_when: false
 
     - name: Check if Kibana is accessible via NodePort (from outside)
-      ansible.builtin.shell: |
-        curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://{{ control_plane_ip }}:{{ kibana_nodeport.stdout }}/kibana/
+      ansible.builtin.uri:
+        url: "https://{{ control_plane_ip }}:{{ kibana_nodeport.stdout }}/kibana/"
+        method: GET
+        return_content: false
+        validate_certs: false  # Equivalent to curl's -k option
+        status_code: [200, 201, 300, 301, 302, 303, 307, 308, 401, 403, 404, 500, 502, 503]  # Accept any response as accessible
+        timeout: 5  # Equivalent to curl's --connect-timeout
       register: kibana_nodeport_access
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
-      changed_when: false
+      failed_when: false  # Better practice than ignore_errors
       when: kibana_nodeport.rc == 0
 
     - name: Check if Kibana config includes basePath
@@ -239,8 +243,8 @@
             configured' }}"
           - "Internal access check: {{ kibana_internal_access.stdout if kibana_internal_access.rc
             == 0 else 'Failed' }}"
-          - "External NodePort access: {{ kibana_nodeport_access.stdout if kibana_nodeport_access
-            is defined and kibana_nodeport_access.rc == 0 else 'Not tested' }}"
+          - "External NodePort access: {{ kibana_nodeport_access.status | default('Not tested')
+            if kibana_nodeport_access is defined else 'Not tested' }}"
           - "BasePath configuration: {{ kibana_basepath.stdout_lines | default(['Unknown'])
             }}"
           - "Recent log entries: {{ kibana_logs.stdout_lines | default(['Could not retrieve

@@ -117,6 +117,7 @@
                 general:
                   level: ERROR
               additionalArguments: []
+        mode: "0644"  # Read/write for owner, read-only for group and others
 
     - name: Apply reset configuration
       ansible.builtin.shell: >
@@ -167,26 +168,35 @@
       ansible.builtin.file:
         path: "{{ playbook_dir }}/generated/{{ item }}"
         state: absent
+      register: script_removal
       loop:
         - test_traefik.sh
         - traefik-portforward.sh
-      ignore_errors: true
+      failed_when:
+        - script_removal.failed is defined
+        - script_removal.failed
+        - not ('No such file or directory' in script_removal.msg | default(''))
 
     - name: Remove config files
       ansible.builtin.file:
         path: "{{ playbook_dir }}/fetched_tokens/{{ item }}"
         state: absent
+      register: config_removal
       loop:
         - traefik-config.yaml
         - traefik-dashboard.yaml
         - traefik-dashboard-alt.yaml
         - traefik-middlewares.yaml
-      ignore_errors: true
+      failed_when:
+        - config_removal.failed is defined
+        - config_removal.failed
+        - not ('No such file or directory' in config_removal.msg | default(''))
 
     - name: Clean up temporary files
       ansible.builtin.file:
         path: "{{ item }}"
         state: absent
+      register: temp_removal
       loop:
         - /tmp/traefik-helm-config.yaml
         - /tmp/traefik-auth-secret.yaml
@@ -199,7 +209,10 @@
         - /tmp/whoami-test.yaml
         - /tmp/reset-traefik-config.yaml
       delegate_to: "{{ groups['utility'][0] }}"
-      ignore_errors: true
+      failed_when:
+        - temp_removal.failed is defined
+        - temp_removal.failed
+        - not ('No such file or directory' in temp_removal.msg | default(''))
 
     # SECTION: VERIFICATION - Verify Traefik has been reset to defaults
     - name: Collect information about current Traefik state

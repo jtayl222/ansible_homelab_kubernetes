@@ -25,24 +25,35 @@
         state: directory
         mode: "0777"
 
-    - name: Test NFS mount from server (will fail if NFS server not ready)
-      mount:
+    - name: Test NFS mount from server
+      ansible.posix.mount:
         path: /mnt/nfs_test
         src: "{{ nfs_server }}:/srv/nfs/kubernetes"
         fstype: nfs
         opts: noatime,soft
         state: mounted
       register: mount_test
-      ignore_errors: true
+      failed_when:
+        - mount_test.failed is defined
+        - mount_test.failed
+        - "'already mounted' not in mount_test.msg | default('')"
 
     - name: Try writing to NFS mount
       ansible.builtin.shell: |
         echo "Test from {{ inventory_hostname }} at $(date)" > /mnt/nfs_test/client_test_{{ inventory_hostname }}.txt
+      register: nfs_write_test
       when: mount_test is success
-      ignore_errors: true
+      changed_when: nfs_write_test.rc == 0  # Consider changed only when command succeeds
+      failed_when:
+        - nfs_write_test.rc != 0  # Command failed
+        - not (
+            'Permission denied' in nfs_write_test.stderr | default('') or
+            'Read-only file system' in nfs_write_test.stderr | default('') or
+            'No space left' in nfs_write_test.stderr | default('')
+          )  # But ignore common NFS-related errors
 
     - name: Clean up test mount
-      mount:
+      ansible.posix.mount:
         path: /mnt/nfs_test
         state: absent
       when: mount_test is success

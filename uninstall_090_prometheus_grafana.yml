@@ -88,14 +88,13 @@
       failed_when: false
 
     - name: Uninstall Prometheus and Grafana stack with Helm
+      when: existing_prometheus.stdout | length > 0
       block:
         - name: Try Helm uninstall
-          ansible.builtin.shell: |
-            helm --kubeconfig="{{ kubeconfig_path }}" uninstall {{ prometheus_release_name }} -n {{ prometheus_namespace }}
-          delegate_to: "{{ groups['utility'][0] }}"
-          become: false
+          ansible.builtin.command:
+            cmd: "helm --kubeconfig={{ kubeconfig_path }} uninstall {{ prometheus_release_name }} -n {{ prometheus_namespace }}"
           register: helm_uninstall
-          failed_when: false
+          changed_when: helm_uninstall.rc == 0 and "uninstalled" in helm_uninstall.stdout
 
         - name: Display uninstall results
           ansible.builtin.debug:
@@ -129,9 +128,9 @@
 
             # Delete pods with extreme prejudice
             echo "Force removing pods..."
-            kubectl --kubeconfig="{{ kubeconfig_path }}" \
-              delete pods -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} \
-              --ignore-not-found=true --force --grace-period=0
+            kubectl --kubeconfig="{{ kubeconfig_path }}" get pods -n {{ prometheus_namespace }} -o name | \
+              xargs -r kubectl --kubeconfig="{{ kubeconfig_path }}" \
+              delete -n {{ prometheus_namespace }} --force --grace-period=0 || true
 
             # Delete services
             echo "Removing services..."
@@ -165,7 +164,6 @@
           register: force_removal
           changed_when: true
           ignore_errors: true
-      when: existing_prometheus.stdout | length > 0
 
     - name: Wait for resources to be removed (30s)
       ansible.builtin.pause:
@@ -276,12 +274,17 @@
       ignore_errors: true
 
     - name: Perform extreme cleanup if resources still remain
+      when: >-
+        verification_check.stdout is search("Running") or verification_check.stdout is search("ClusterIP")
       block:
         - name: Check if resources still remain
           ansible.builtin.shell: |
+            set -o pipefail
             REMAINING=$(kubectl --kubeconfig="{{ kubeconfig_path }}" \
               get all -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null | wc -l)
             echo $REMAINING
+          args:
+            executable: /bin/bash
           delegate_to: "{{ groups['utility'][0] }}"
           become: false
           register: remaining_count
@@ -289,6 +292,7 @@
 
         - name: Execute extreme cleanup
           ansible.builtin.shell: |
+            set -o pipefail
             echo "Performing extreme cleanup - directly patching resources to remove finalizers..."
 
             # Get all resources with finalizers
@@ -305,9 +309,9 @@
 
             # Force delete pods with extreme prejudice
             echo "Force deleting remaining pods..."
-            kubectl --kubeconfig="{{ kubeconfig_path }}" \
-              get pods -n {{ prometheus_namespace }} -o name | xargs -r kubectl --kubeconfig="{{ kubeconfig_path }}" \
-                delete -n {{ prometheus_namespace }} --force --grace-period=0 || true
+            kubectl --kubeconfig="{{ kubeconfig_path }}" get pods -n {{ prometheus_namespace }} -o name | \
+              xargs -r kubectl --kubeconfig="{{ kubeconfig_path }}" \
+              delete -n {{ prometheus_namespace }} --force --grace-period=0 || true
 
             # Apply nuclear option if needed - direct etcd manipulation via the API to remove stuck resources
             echo "Force removing remaining resources via API..."
@@ -320,21 +324,21 @@
                   delete $RESOURCE -n {{ prometheus_namespace }} --force --grace-period=0 || true
               done
             done
+          args:
+            executable: /bin/bash
           delegate_to: "{{ groups['utility'][0] }}"
           become: false
           register: extreme_cleanup
-          changed_when: true
+          changed_when: >-
+            extreme_cleanup.stdout is search("Removing") or extreme_cleanup.stdout is search("Deleted")
+            or extreme_cleanup.stdout is search("Force deleting")
           when: remaining_count.stdout | int > 0
-      when:
-        verification_check.stdout is search("Running") or verification_check.stdout
-        is search("ClusterIP")
 
     - name: Extended wait for all resources to terminate (if needed)
       ansible.builtin.pause:
         seconds: 10
-      when:
-        verification_check.stdout is search("Running") or verification_check.stdout
-        is search("ClusterIP")
+      when: >-
+        verification_check.stdout is search("Running") or verification_check.stdout is search("ClusterIP")
 
     - name: Final verification
       ansible.builtin.shell: |
@@ -350,6 +354,27 @@
       register: final_verification
       changed_when: false
       ignore_errors: true
+
+    - name: Clean up additional dashboards ConfigMap
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        api_version: v1
+        kind: ConfigMap
+        name: "{{ item.metadata.name }}"
+        namespace: "{{ prometheus_namespace }}"
+      register: configmap_cleanup
+      with_items: "{{ dashboard_configmaps.resources | default([]) }}"
+      delegate_to: "{{ groups['utility'][0] }}"
+      become: false
+      failed_when:
+        - configmap_cleanup.failed is defined
+        - configmap_cleanup.failed
+        - not (
+            configmap_cleanup.msg | default('') is search('not found') or
+            configmap_cleanup.msg | default('') is search('NotFound') or
+            configmap_cleanup.msg | default('') is search('does not exist')
+          )
 
     - name: Clean up remaining Prometheus services in kube-system
       ansible.builtin.shell: |

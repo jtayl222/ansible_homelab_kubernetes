@@ -148,7 +148,7 @@
         mlflow_healthy: >-
           {{
             'Running' in mlflow_pods.stdout and
-            nodeport_check.stdout == mlflow_nodeport|string and
+            nodeport_check.stdout == mlflow_nodeport | string and
             'not found' not in ingress_check.stdout and
             api_access.status == 200 and
             ui_access_nodeport.status == 200 and
@@ -163,10 +163,10 @@
           - "--------------------------------------"
           - "MLflow deployment exists: {{ 'Yes' if 'Running' in mlflow_pods.stdout else
             'No' }}"
-          - "MLflow services: {{ 'Configured' if mlflow_services.stdout_lines|length >
+          - "MLflow services: {{ 'Configured' if mlflow_services.stdout_lines | length >
             0 else 'Not configured' }}"
           - "NodePort service ({{ mlflow_nodeport }}): {{ 'Available' if nodeport_check.stdout
-            == mlflow_nodeport|string else 'Not available' }}"
+            == mlflow_nodeport | string else 'Not available' }}"
           - "IngressRoute: {{ 'Configured' if 'not found' not in ingress_check.stdout
             else 'Not configured' }}"
           - "PVC Status: {{ mlflow_pvc.stdout if mlflow_pvc.stdout else 'Not available'
@@ -189,10 +189,18 @@
           - "MLflow services: {{ 'Configured' if mlflow_services.stdout_lines | length > 0 else 'Not configured' }}"
           - "MLflow pods: {{ mlflow_pods.stdout }} running"
           - "MLflow PVC: {{ 'Created' if mlflow_pvc.stdout == 'Bound' else 'Not created' }}"
-          - "NodePort service ({{ mlflow_nodeport }}): {{ 'Available' if nodeport_check.stdout == mlflow_nodeport | string else 'Not available' }}"
-          - "API access via NodePort: {{ 'Working' if api_access.status is defined and api_access.status == 200 else 'Not working' }}"
-          - "UI access via NodePort: {{ 'Working' if ui_access_nodeport.status is defined and ui_access_nodeport.status == 200 else 'Not working' }}"
-          - "UI access via Ingress ({{ mlflow_host }}): {{ 'Working' if ui_access_ingress.status is defined and ui_access_ingress.status == 200 else 'Not working' }}"
+          - >-
+            NodePort service ({{ mlflow_nodeport }}): {{ 'Available' if nodeport_check.stdout == mlflow_nodeport | string
+              else 'Not available' }}
+          - >-
+            API access via NodePort: {{ 'Working' if api_access.status is defined and api_access.status == 200
+            else 'Not working' }}
+          - >-
+            UI access via NodePort: {{ 'Working' if ui_access_nodeport.status is defined
+              and ui_access_nodeport.status == 200 else 'Not working' }}
+          - >-
+            UI access via Ingress ({{ mlflow_host }}): {{ 'Working' if ui_access_ingress.status is defined
+              and ui_access_ingress.status == 200 else 'Not working' }}
 
       # Access information
     - name: Display MLflow access information

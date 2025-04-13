@@ -21,16 +21,24 @@
           metadata:
             name: kibana
             namespace: "{{ elastic_namespace }}"
+      register: kibana_removal
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      failed_when:
+        - kibana_removal.failed is defined
+        - kibana_removal.failed
+        - not (
+            kibana_removal.msg | default('') is search('not found') or
+            kibana_removal.msg | default('') is search('NotFound') or
+            kibana_removal.msg | default('') is search('does not exist')
+          )
 
     - name: Wait for Kibana to be deleted
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get kibana 2>&1 | grep -c "No resources found" || true
       register: kibana_deleted
-      until: kibana_deleted.stdout|int > 0 or kibana_deleted.rc != 0
+      until: kibana_deleted.stdout | int > 0 or kibana_deleted.rc != 0
       retries: 10
       delay: 10
       delegate_to: "{{ groups['utility'][0] }}"

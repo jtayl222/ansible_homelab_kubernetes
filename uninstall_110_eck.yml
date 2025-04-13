@@ -93,7 +93,12 @@
         - kibana-kb-nodeport
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_nodeport_result
+      failed_when:
+        - remove_nodeport_result.failed is defined
+        - remove_nodeport_result.failed
+        - "'not found' not in remove_nodeport_result.msg | default('')"
+        - "'already deleted' not in remove_nodeport_result.msg | default('')"
 
       # Remove Kibana and Elasticsearch resources
     - name: Remove Kibana
@@ -108,14 +113,19 @@
             namespace: "{{ elastic_namespace }}"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_kibana_result
+      failed_when:
+        - remove_kibana_result.failed is defined
+        - remove_kibana_result.failed
+        - "'not found' not in remove_kibana_result.msg | default('')"
+        - "'already deleted' not in remove_kibana_result.msg | default('')"
 
     - name: Wait for Kibana to be deleted
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get kibana 2>&1 | grep -c "No resources found" || true
       register: kibana_deleted
-      until: kibana_deleted.stdout|int > 0 or kibana_deleted.rc != 0
+      until: kibana_deleted.stdout | int > 0 or kibana_deleted.rc != 0
       retries: 10
       delay: 10
       delegate_to: "{{ groups['utility'][0] }}"
@@ -135,7 +145,12 @@
             namespace: "{{ elastic_namespace }}"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_elasticsearch_result
+      failed_when:
+        - remove_elasticsearch_result.failed is defined
+        - remove_elasticsearch_result.failed
+        - "'not found' not in remove_elasticsearch_result.msg | default('')"
+        - "'already deleted' not in remove_elasticsearch_result.msg | default('')"
 
     - name: Wait for Elasticsearch to be deleted
       ansible.builtin.shell: |
@@ -161,7 +176,12 @@
             name: "{{ elastic_namespace }}"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_namespace_result
+      failed_when:
+        - remove_namespace_result.failed is defined
+        - remove_namespace_result.failed
+        - "'not found' not in remove_namespace_result.msg | default('')"
+        - "'already deleted' not in remove_namespace_result.msg | default('')"
       when: elasticsearch_deleted.stdout | int > 0 or elasticsearch_deleted.rc != 0
 
       # Remove the ECK operator
@@ -172,14 +192,19 @@
         src: https://download.elastic.co/downloads/eck/2.9.0/operator.yaml
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_operator_result
+      failed_when:
+        - remove_operator_result.failed is defined
+        - remove_operator_result.failed
+        - "'not found' not in remove_operator_result.msg | default('')"
+        - "'already deleted' not in remove_operator_result.msg | default('')"
 
     - name: Wait for ECK operator to be deleted
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ operator_namespace }} \
           get statefulset 2>&1 | grep -c "No resources found" || true
       register: operator_deleted
-      until: operator_deleted.stdout|int > 0 or operator_deleted.rc != 0
+      until: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
       retries: 10
       delay: 10
       delegate_to: "{{ groups['utility'][0] }}"
@@ -195,7 +220,12 @@
         src: https://download.elastic.co/downloads/eck/2.9.0/crds.yaml
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
+      register: remove_crds_result
+      failed_when:
+        - remove_crds_result.failed is defined
+        - remove_crds_result.failed
+        - "'not found' not in remove_crds_result.msg | default('')"
+        - "'already deleted' not in remove_crds_result.msg | default('')"
 
     - name: Remove operator namespace
       kubernetes.core.k8s:
@@ -208,8 +238,13 @@
             name: "{{ operator_namespace }}"
       delegate_to: "{{ groups['utility'][0] }}"
       become: false
-      ignore_errors: true
-      when: operator_deleted.stdout|int > 0 or operator_deleted.rc != 0
+      register: remove_operator_ns_result
+      failed_when:
+        - remove_operator_ns_result.failed is defined
+        - remove_operator_ns_result.failed
+        - "'not found' not in remove_operator_ns_result.msg | default('')"
+        - "'already deleted' not in remove_operator_ns_result.msg | default('')"
+      when: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
 
       # Check for any leftover PVCs
     - name: Check for any leftover PVCs

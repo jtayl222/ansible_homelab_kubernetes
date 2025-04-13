@@ -9,7 +9,7 @@
         src: /var/lib/rancher/k3s/server/node-token
       register: node_token_b64
       delegate_to: "{{ control_node }}"
-    
+
     - name: Set k3s token fact
       ansible.builtin.set_fact:
         k3s_token: "{{ node_token_b64['content'] | b64decode | trim }}"
@@ -74,6 +74,7 @@
       register: nodes_status
       delegate_to: "{{ control_node }}"
       become: true
+      changed_when: false  # Add this line to indicate the command doesn't change anything
 
     - name: Display nodes status
       ansible.builtin.debug:

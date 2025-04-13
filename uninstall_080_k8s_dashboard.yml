@@ -5,7 +5,7 @@
     kubeconfig_path: /etc/rancher/k3s/k3s.yaml
   tasks:
     - name: Check if kubernetes-dashboard namespace exists
-      ansible.builtin.shell: kubectl get namespace kubernetes-dashboard --no-headers --ignore-not-found
+      ansible.builtin.command: kubectl get namespace kubernetes-dashboard --no-headers --ignore-not-found
       register: dashboard_namespace
       changed_when: false
       failed_when: false
@@ -17,15 +17,17 @@
       when: dashboard_namespace.stdout == ""
 
     - name: Remove Kubernetes Dashboard Ingress
-      ansible.builtin.shell: kubectl delete ingress kubernetes-dashboard -n kubernetes-dashboard --ignore-not-found
+      ansible.builtin.command: kubectl delete ingress kubernetes-dashboard -n kubernetes-dashboard --ignore-not-found
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: ingress_deletion
+      changed_when: ingress_deletion.stdout != ""
+      failed_when:
+        - ingress_deletion.rc != 0
+        - "'not found' not in ingress_deletion.stderr"
 
     - name: Check if Traefik IngressRoute exists
-      ansible.builtin.shell:
-        kubectl get ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
-        --ignore-not-found
+      ansible.builtin.command: kubectl get ingressroute kubernetes-dashboard-route -n kubernetes-dashboard --ignore-not-found
       register: dashboard_ingressroute
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
@@ -33,45 +35,65 @@
       changed_when: false
 
     - name: Remove Traefik IngressRoute if exists
-      ansible.builtin.shell: kubectl delete ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
+      ansible.builtin.command: kubectl delete ingressroute kubernetes-dashboard-route -n kubernetes-dashboard
       when: dashboard_ingressroute.stdout != ""
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: ingressroute_deletion
+      changed_when: ingressroute_deletion.stdout != ""
+      failed_when:
+        - ingressroute_deletion.rc != 0
+        - "'not found' not in ingressroute_deletion.stderr | default('')"
 
     - name: Remove Traefik Middleware if exists
-      ansible.builtin.shell: kubectl delete middleware dashboard-headers -n kubernetes-dashboard --ignore-not-found
+      ansible.builtin.command: kubectl delete middleware dashboard-headers -n kubernetes-dashboard --ignore-not-found
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: middleware_deletion
+      changed_when: middleware_deletion.stdout != ""
+      failed_when:
+        - middleware_deletion.rc != 0
+        - "'not found' not in middleware_deletion.stderr | default('')"
 
     - name: Remove ClusterRoleBinding for dashboard admin
-      ansible.builtin.shell: kubectl delete clusterrolebinding dashboard-admin --ignore-not-found
+      ansible.builtin.command: kubectl delete clusterrolebinding dashboard-admin --ignore-not-found
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: role_binding_deletion
+      changed_when: role_binding_deletion.stdout != ""
+      failed_when:
+        - role_binding_deletion.rc != 0
+        - "'not found' not in role_binding_deletion.stderr | default('')"
 
     - name: Remove ServiceAccount for dashboard admin
-      ansible.builtin.shell: kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard --ignore-not-found
+      ansible.builtin.command: kubectl delete serviceaccount dashboard-admin -n kubernetes-dashboard --ignore-not-found
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: serviceaccount_deletion
+      changed_when: serviceaccount_deletion.stdout != ""
+      failed_when:
+        - serviceaccount_deletion.rc != 0
+        - "'not found' not in serviceaccount_deletion.stderr | default('')"
 
     - name: Check if Kubernetes Dashboard is installed via Helm
-      ansible.builtin.shell:
-        helm list -n kubernetes-dashboard -q | grep kubernetes-dashboard || echo
-        ""
+      ansible.builtin.shell: |
+        set -o pipefail
+        helm list -n kubernetes-dashboard -q | grep kubernetes-dashboard || echo ""
       register: dashboard_helm_check
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
       changed_when: false
       failed_when: false
+      args:
+        executable: /bin/bash
 
     - name: Uninstall Kubernetes Dashboard via Helm
-      ansible.builtin.shell: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
+      ansible.builtin.command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
       when: dashboard_helm_check.stdout != ""
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
+      register: helm_uninstall
+      changed_when: helm_uninstall.rc == 0
 
     - name: Wait for resources to be removed
       ansible.builtin.pause:
@@ -79,10 +101,14 @@
       when: dashboard_helm_check.stdout != ""
 
     - name: Delete kubernetes-dashboard namespace
-      ansible.builtin.shell: kubectl delete namespace kubernetes-dashboard --ignore-not-found
+      ansible.builtin.command: kubectl delete namespace kubernetes-dashboard --ignore-not-found
       environment:
         KUBECONFIG: "{{ kubeconfig_path }}"
-      ignore_errors: true
+      register: namespace_deletion
+      changed_when: namespace_deletion.stdout != ""
+      failed_when:
+        - namespace_deletion.rc != 0
+        - "'not found' not in namespace_deletion.stderr | default('')"
 
     - name: Check if resources are removed
       ansible.builtin.shell: |

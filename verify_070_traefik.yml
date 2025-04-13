@@ -59,8 +59,11 @@
       # 4. Verify Traefik CRDs
     - name: Check for Traefik CRDs
       ansible.builtin.shell: |
+        set -o pipefail
         kubectl --kubeconfig={{ kubeconfig_path }} \
           get crd | grep -E 'ingressroute|middleware' || echo "NO_CRD"
+      args:
+        executable: /bin/bash
       register: crd_check
       changed_when: false
 
@@ -111,7 +114,7 @@
     - name: Test dashboard access via direct IP
       ansible.builtin.uri:
         url:
-          http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80')}}/dashboard/
+          http://{{ control_plane_ip }}:{{ traefik_web_port.stdout | default('80') }}/dashboard/
         method: GET
         user: admin
         password: admin
@@ -165,10 +168,10 @@
             'Not configured' }}"
           - ""
           - "Access Verification:"
-          - "  - Domain Access: {{ 'Success (' + domain_access.status|string + ')' if
+          - "  - Domain Access: {{ 'Success (' + domain_access.status | string + ')' if
             domain_access is defined and domain_access.status in [200, 401] else 'Failed
             or not accessible' }}"
-          - "  - Direct IP Access: {{ 'Success (' + direct_access.status|string + ')'
+          - "  - Direct IP Access: {{ 'Success (' + direct_access.status | string + ')'
             if direct_access is defined and direct_access.status in [200, 401] else 'Failed
             or not accessible' }}"
           - ""

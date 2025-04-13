@@ -303,21 +303,27 @@
 
       # 14. Test MinIO API access
     - name: Test MinIO API access
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live"
+        method: GET
+        follow_redirects: yes
+        timeout: 10
+        return_content: no
       register: api_access
       become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false  # Don't fail if the request fails
 
       # 15. Test MinIO Console access
     - name: Test MinIO Console access
-      ansible.builtin.shell: |
-        curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 --max-time 10 http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/
+      ansible.builtin.uri:
+        url: "http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/"
+        method: GET
+        follow_redirects: yes
+        timeout: 10
+        return_content: no
       register: console_access
       become: false
-      changed_when: false
-      ignore_errors: true
+      failed_when: false  # Don't fail if the request fails
 
       # 16. Display installation summary
     - name: Display MinIO installation summary
@@ -350,10 +356,14 @@
             - check output' }}"
           - "- Test Upload: {{ 'Successful' if test_upload.rc == 0 else 'Failed or skipped'
             }}"
-          - "- API Access: {{ 'Accessible (HTTP ' + api_access.stdout + ')' if api_access.rc
-            == 0 else 'Not accessible' }}"
-          - "- Console Access: {{ 'Accessible (HTTP ' + console_access.stdout + ')' if
-            console_access.rc == 0 else 'Not accessible' }}"
+          - >-
+            - API Access: {{ 'Accessible (HTTP ' + (api_access.status | default(0)) | string + ')'
+            if api_access is successful
+            else 'Not accessible' }}
+          - >-
+            - Console Access: {{ 'Accessible (HTTP ' + (console_access.status | default(0)) | string + ')'
+            if console_access is successful
+            else 'Not accessible' }}
           - ""
           - "Storage Configuration:"
           - "- Storage Size: {{ minio_storage_size }}"

@@ -50,11 +50,7 @@
           become: false
           changed_when: "'deleted' in deployment_deleted.stdout"
           ignore_errors: true
-
-        - name: Wait for pods to terminate
-          ansible.builtin.pause:
-            seconds: 10
-          when: deployment_deleted.changed
+          notify: Wait for MLflow pods to terminate
 
         - name: Delete MLflow PVC
           ansible.builtin.shell: |
@@ -91,3 +87,8 @@
             'Not found or not deleted' }}"
           - =========================================
       when: "'not found' not in mlflow_ns.stdout"
+
+  handlers:
+    - name: Wait for MLflow pods to terminate
+      ansible.builtin.pause:
+        seconds: 10

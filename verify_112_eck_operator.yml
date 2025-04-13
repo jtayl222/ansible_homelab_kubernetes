@@ -73,14 +73,14 @@
             logs']) }}"
           - "--------------------------------------"
           - "Overall status: {{ 'HEALTHY' if operator_namespace_exists.rc == 0 and operator_exists.rc
-            == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
+            == 0 and operator_running.stdout == 'Running' and crd_count.stdout | int > 0
             else 'ISSUES DETECTED' }}"
 
     - name: Set verification status
       ansible.builtin.set_fact:
         operator_healthy:
           "{{ operator_namespace_exists.rc == 0 and operator_exists.rc
-          == 0 and operator_running.stdout == 'Running' and crd_count.stdout|int > 0
+          == 0 and operator_running.stdout == 'Running' and crd_count.stdout | int > 0
           }}"
 
     - name: Fail if operator is not healthy
