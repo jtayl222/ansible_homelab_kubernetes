@@ -1,3 +1,5 @@
+![Lint Status](https://github.com/jtayl222/ansible_homelab_kubernetes/actions/workflows/lint.yml/badge.svg)
+
 # Kubernetes Homelab Setup with K3s, NFS, Prometheus, and Grafana
 
 This repository contains Ansible playbooks to deploy and manage a lightweight Kubernetes cluster using K3s in a homelab environment. The setup includes NFS for persistent storage, Prometheus and Grafana for monitoring, and Traefik for ingress routing. These playbooks automate the installation, configuration, testing, and cleanup of the cluster and its components.
