@@ -3,30 +3,38 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
     mlflow_namespace: mlflow
-    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+    control_plane_ip:
+      "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
       }}"
     mlflow_pvc_size: 10Gi
     mlflow_nodeport: 30120
-    mlflow_image: ghcr.io/mlflow/mlflow:v2.9.2
-    mlflow_artifacts_path: /mnt/mlflow
+    mlflow_image: ghcr.io/mlflow/mlflow:v2.21.3
+    mlflow_artifacts_path: "s3://mlflow-artifacts"
     mlflow_host: mlflow.{{ control_plane_ip }}.nip.io
+    minio_access_key: "minioadmin" # Use your actual MinIO credentials
+    minio_secret_key: "minioadmin" # Use your actual MinIO credentials
+    minio_endpoint: "http://minio.minio.svc.cluster.local:9000"
     # TLS configuration
     enable_tls: true
     tls_cert_file: /tmp/mlflow-certs/tls.crt
     tls_key_file: /tmp/mlflow-certs/tls.key
+    mlflow_db_pvc_name: mlflow-database # Rename from mlflow-artifacts
+    mlflow_db_pvc_size: 2Gi # Smaller size for just the DB
+    mlflow_db_path: "/mnt/database/mlflow.db" # Clearer path
 
   tasks:
     # Check prerequisites
     - name: Ensure kubeconfig exists
       ansible.builtin.stat:
-        path: '{{ kubeconfig_path }}'
+        path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
 
     - name: Fail if kubeconfig doesn't exist
       ansible.builtin.fail:
-        msg: Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
+        msg:
+          Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
           first.
       when: not kubeconfig_stat.stat.exists
 
@@ -42,7 +50,8 @@
 
     - name: Display MLflow installation status
       ansible.builtin.debug:
-        msg: "MLflow namespace: {{ 'Already exists' if 'not found' not in mlflow_ns_check.stdout
+        msg:
+          "MLflow namespace: {{ 'Already exists' if 'not found' not in mlflow_ns_check.stdout
           else 'Will be created' }}"
 
       # Clean up any failed deployment first
@@ -74,20 +83,20 @@
       # Create namespace if needed
     - name: Create MLflow namespace if it doesn't exist
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: Namespace
           metadata:
-            name: '{{ mlflow_namespace }}'
+            name: "{{ mlflow_namespace }}"
       become: false
       when: "'not found' in mlflow_ns_check.stdout"
 
       # Add this task after the namespace is created but before creating IngressRoutes
     - name: Create MLflow strip-prefix middleware
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
@@ -105,34 +114,53 @@
       # Create PVC for MLflow artifacts
     - name: Create PVC for MLflow artifacts
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: PersistentVolumeClaim
           metadata:
             name: mlflow-artifacts
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
           spec:
             accessModes:
               - ReadWriteMany
             resources:
               requests:
-                storage: '{{ mlflow_pvc_size }}'
+                storage: "{{ mlflow_pvc_size }}"
             storageClassName: nfs-client
       become: false
+
+      # Change PVC name
+    - name: Create PVC for MLflow database
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: PersistentVolumeClaim
+          metadata:
+            name: "{{ mlflow_db_pvc_name }}" # Changed name
+            namespace: "{{ mlflow_namespace }}"
+          spec:
+            accessModes:
+              - ReadWriteMany
+            resources:
+              requests:
+                storage: "{{ mlflow_db_pvc_size }}"
+            storageClassName: nfs-client
 
       # Deploy MLflow server - FIXED COMMAND
     - name: Deploy MLflow server
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: apps/v1
           kind: Deployment
           metadata:
             name: mlflow
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
             labels:
               app: mlflow
           spec:
@@ -160,21 +188,32 @@
                         mountPath: /mnt/mlflow
                 containers:
                   - name: mlflow
-                    image: '{{ mlflow_image }}'
+                    image: "{{ mlflow_image }}"
                     imagePullPolicy: IfNotPresent
                     ports:
                       - containerPort: 5000
                         name: http
-                    command: [mlflow]      # Fixed: Use the mlflow command
+                    command: ["/bin/sh", "-c"]
                     args:
-                      - server
-                      - --host=0.0.0.0
-                      - --port=5000
-                      - --default-artifact-root=file:{{ mlflow_artifacts_path }}
-                      - --serve-artifacts
+                      - |
+                        pip install boto3
+                        mlflow server \
+                          --host=0.0.0.0 \
+                          --port=5000 \
+                          --backend-store-uri=sqlite:///{{ mlflow_db_path }} \
+                          --default-artifact-root={{ mlflow_artifacts_path }} \
+                          --serve-artifacts
                     env:
-                      - name: MLFLOW_ARTIFACTS_PATH
-                        value: /mnt/mlflow
+                      - name: AWS_ACCESS_KEY_ID
+                        value: "{{ minio_access_key }}"
+                      - name: AWS_SECRET_ACCESS_KEY
+                        value: "{{ minio_secret_key }}"
+                      - name: MLFLOW_S3_ENDPOINT_URL
+                        value: "{{ minio_endpoint }}"
+                      - name: MLFLOW_S3_IGNORE_TLS
+                        value: "true"
+                      - name: MLFLOW_ARTIFACTS_DOWNLOAD_TIMEOUT
+                        value: "180"
                     readinessProbe:
                       httpGet:
                         path: /
@@ -196,24 +235,37 @@
                         cpu: 500m
                     volumeMounts:
                       - name: mlflow-artifacts
-                        mountPath: '{{ mlflow_artifacts_path }}'
+                        mountPath: /mnt/mlflow # Change to a local path, not s3://
+                      - name: dependencies
+                        mountPath: /usr/local/lib/python3.10/site-packages/boto3
+                        subPath: boto3
+                      - name: dependencies
+                        mountPath: /usr/local/lib/python3.10/site-packages/botocore
+                        subPath: botocore
+                      - name: mlflow-database # Changed name
+                        mountPath: /mnt/database # Changed path
                 volumes:
                   - name: mlflow-artifacts
                     persistentVolumeClaim:
                       claimName: mlflow-artifacts
+                  - name: dependencies
+                    emptyDir: {}
+                  - name: mlflow-database # Changed name
+                    persistentVolumeClaim:
+                      claimName: "{{ mlflow_db_pvc_name }}" # Changed reference
       become: false
 
       # Create MLflow service
     - name: Create MLflow service
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: Service
           metadata:
             name: mlflow
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
             labels:
               app: mlflow
           spec:
@@ -229,14 +281,14 @@
       # Create NodePort service for MLflow
     - name: Create NodePort service for MLflow
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: Service
           metadata:
             name: mlflow-nodeport
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
             labels:
               app: mlflow
           spec:
@@ -244,7 +296,7 @@
             ports:
               - port: 5000
                 targetPort: 5000
-                nodePort: '{{ mlflow_nodeport }}'
+                nodePort: "{{ mlflow_nodeport }}"
                 protocol: TCP
                 name: http
             selector:
@@ -254,14 +306,14 @@
       # Create Traefik IngressRoute for MLflow
     - name: Create Traefik IngressRoute for MLflow
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
           metadata:
             name: mlflow-ingress
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
           spec:
             entryPoints:
               - web
@@ -279,7 +331,7 @@
       # Create middleware for proper routing
     - name: Create strip prefix middleware
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
@@ -296,33 +348,33 @@
 
     - name: Create headers middleware
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
           kind: Middleware
           metadata:
             name: mlflow-headers
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
           spec:
             headers:
               customRequestHeaders:
                 X-Script-Name: /mlflow
               customResponseHeaders:
-                Access-Control-Allow-Origin: '*'
+                Access-Control-Allow-Origin: "*"
       become: false
 
       # Create IngressRoute for path-based access
     - name: Create path-based IngressRoute
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
           kind: IngressRoute
           metadata:
             name: mlflow-path
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
           spec:
             entryPoints:
               - web
@@ -335,9 +387,9 @@
                     port: 5000
                 middlewares:
                   - name: mlflow-strip-prefix
-                    namespace: '{{ mlflow_namespace }}'
+                    namespace: "{{ mlflow_namespace }}"
                   - name: mlflow-headers
-                    namespace: '{{ mlflow_namespace }}'
+                    namespace: "{{ mlflow_namespace }}"
             tls: {}
       become: false
       when: enable_tls
@@ -345,7 +397,7 @@
       # Update MLflow routing configuration
     - name: Create MLflow routing configuration
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         verify_ssl: no
         state: present
         definition:
@@ -367,7 +419,7 @@
 
     - name: Create MLflow path-based route
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         verify_ssl: no
         state: present
         definition:
@@ -394,7 +446,7 @@
       ansible.builtin.file:
         path: /tmp/mlflow-certs
         state: directory
-        mode: '0755'
+        mode: "0755"
       become: false
       when: enable_tls
 
@@ -404,7 +456,7 @@
           -keyout {{ tls_key_file }} -out {{ tls_cert_file }} \
           -subj "/CN={{ mlflow_host }}/O=MLflow K3s"
       args:
-        creates: '{{ tls_cert_file }}'
+        creates: "{{ tls_cert_file }}"
       become: false
       when: enable_tls
 
@@ -424,14 +476,14 @@
       # Create a persist-data ConfigMap with script to ensure data persistence
     - name: Create persistence ConfigMap
       kubernetes.core.k8s:
-        kubeconfig: '{{ kubeconfig_path }}'
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
           kind: ConfigMap
           metadata:
             name: mlflow-persistence
-            namespace: '{{ mlflow_namespace }}'
+            namespace: "{{ mlflow_namespace }}"
           data:
             ensure-persistence.sh: |
               #!/bin/sh
@@ -469,7 +521,7 @@
 
     - name: Display MLflow pod logs
       ansible.builtin.debug:
-        msg: '{{ mlflow_logs.stdout_lines }}'
+        msg: "{{ mlflow_logs.stdout_lines }}"
 
     - name: Verify MLflow pod is running
       ansible.builtin.shell: |
@@ -539,7 +591,7 @@
     - name: Display access test results
       ansible.builtin.debug:
         msg:
-          - 'Access test results:'
+          - "Access test results:"
           - "- Path-based access (/mlflow/): {{ path_access_status }}"
           - "- Host-based access ({{ mlflow_host }}): {{ host_access_status }}"
           - "- NodePort access (port {{ mlflow_nodeport }}): {{ nodeport_access_status }}"
@@ -551,33 +603,33 @@
         msg:
           - ==================== MLFLOW INSTALLATION SUMMARY ====================
           - MLflow has been successfully deployed.
-          - ''
-          - 'Access URLs:'
-          - '- MLflow UI via NodePort: http://{{ control_plane_ip }}:{{ mlflow_nodeport
-            }}/'
-          - '- MLflow UI via Path-based routing: http://{{ control_plane_ip }}/mlflow/'
-          - '- MLflow UI via Host-based routing: http://{{ mlflow_host }}/'
-          - '{% if enable_tls %}- MLflow UI via HTTPS (secure): https://{{ mlflow_host
-            }}/{% endif %}'
-          - ''
-          - 'MLflow Connection Details:'
-          - '- Tracking URI: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/'
-          - '- Artifact Root: file:{{ mlflow_artifacts_path }}'
-          - ''
-          - 'Persistence:'
-          - '- MLflow data is stored in a persistent volume that will survive reboots'
-          - '- Init container ensures proper permissions on each startup'
-          - '- To confirm persistence after reboot, check for file: persistence-test.txt'
-          - ''
-          - 'Traefik Configuration:'
-          - '- Path-based routing with prefix stripping enabled'
-          - '- Host-based routing for clean URLs'
-          - '- Custom headers middleware for proper API functionality'
-          - '{% if enable_tls %}- TLS enabled with self-signed certificate{% endif %}'
-          - ''
-          - 'Health & Monitoring:'
-          - '- Readiness probe configured for proper load balancing'
-          - '- Liveness probe configured for automatic recovery'
-          - '- Resource limits set for stability'
-          - 'Verify installation with: ansible-playbook -i inventory/hosts verify_120_mlflow.yml'
+          - ""
+          - "Access URLs:"
+          - "- MLflow UI via NodePort: http://{{ control_plane_ip }}:{{ mlflow_nodeport
+            }}/"
+          - "- MLflow UI via Path-based routing: http://{{ control_plane_ip }}/mlflow/"
+          - "- MLflow UI via Host-based routing: http://{{ mlflow_host }}/"
+          - "{% if enable_tls %}- MLflow UI via HTTPS (secure): https://{{ mlflow_host
+            }}/{% endif %}"
+          - ""
+          - "MLflow Connection Details:"
+          - "- Tracking URI: http://{{ control_plane_ip }}:{{ mlflow_nodeport }}/"
+          - "- Artifact Root: file:{{ mlflow_artifacts_path }}"
+          - ""
+          - "Persistence:"
+          - "- MLflow data is stored in a persistent volume that will survive reboots"
+          - "- Init container ensures proper permissions on each startup"
+          - "- To confirm persistence after reboot, check for file: persistence-test.txt"
+          - ""
+          - "Traefik Configuration:"
+          - "- Path-based routing with prefix stripping enabled"
+          - "- Host-based routing for clean URLs"
+          - "- Custom headers middleware for proper API functionality"
+          - "{% if enable_tls %}- TLS enabled with self-signed certificate{% endif %}"
+          - ""
+          - "Health & Monitoring:"
+          - "- Readiness probe configured for proper load balancing"
+          - "- Liveness probe configured for automatic recovery"
+          - "- Resource limits set for stability"
+          - "Verify installation with: ansible-playbook -i inventory/hosts verify_120_mlflow.yml"
           - ==================================================================
