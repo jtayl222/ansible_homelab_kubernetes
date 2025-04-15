@@ -1,5 +1,5 @@
 formatter:
   indent: 2
   line_width: 160
-  preserve_line_breaks: true
+  preserve_line_breaks: false
   include_document_start: true
