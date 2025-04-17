@@ -373,6 +373,8 @@
             routes:
               - match: Host(`{{ argo_host }}`) || Host(`argo.local`)
                 kind: Rule
+                middlewares:
+                  - name: redirect-to-https
                 services:
                   - name: argo-server
                     port: 2746
@@ -395,32 +397,6 @@
             insecureSkipVerify: true
       become: false
 
-    - name: Create HTTP IngressRoute for Argo UI
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: IngressRoute
-          metadata:
-            name: argo-workflows-ingress-http
-            namespace: "{{ argo_namespace }}"
-          spec:
-            entryPoints:
-              - web
-            routes:
-              - match: Host(`{{ argo_host }}`) || Host(`argo.local`)
-                kind: Rule
-                middlewares:
-                  - name: redirect-to-https
-                  - name: cors
-                services:
-                  - name: argo-server
-                    port: 2746
-                    scheme: https
-                    serversTransport: insecure-transport
-      become: false
-
     - name: Create redirect middleware for HTTPS
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -435,48 +411,6 @@
             redirectScheme:
               scheme: https
               permanent: true
-      become: false
-
-      # Create a CORS middleware for Traefik to ensure CORS headers are preserved:
-    - name: Traefik CORS middleware
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: traefik.io/v1alpha1
-          kind: Middleware
-          metadata:
-            name: cors
-            namespace: "{{ argo_namespace }}"
-          spec:
-            accessControlAllowMethods:
-              - GET
-              - POST
-              - PUT
-              - DELETE
-              - OPTIONS
-            accessControlAllowHeaders: "*"
-            accessControlAllowOriginList:
-              - "*"
-            accessControlMaxAge: 100
-            addVaryHeader: true
-
-      # Add a comprehensive CORS ConfigMap
-    - name: Create ConfigMap for comprehensive CORS configuration
-      kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig_path }}"
-        state: present
-        definition:
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: argo-server-config
-            namespace: "{{ argo_namespace }}"
-          data:
-            config: |
-              corsAllowOrigins: ["*"]
-              corsAllowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
-              corsAllowHeaders: ["Authorization", "Content-Type", "Accept"]
       become: false
 
       # Add this diagnostic task before the restart
