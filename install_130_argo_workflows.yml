@@ -1,18 +1,19 @@
----
 # filepath: /home/user/ansible_homelab_kubernetes/install_130_argo_workflows.yml
 - name: Install and Configure Argo Workflows
   hosts: utility
   gather_facts: true
   vars:
     kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    argo_namespace: "argo"
-    control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
-    argo_version: "v3.6.5" # Match version to available manifests
-    argo_host: "argo.{{ control_plane_ip }}.nip.io"
+    argo_namespace: argo
+    control_plane_ip:
+      "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+      }}"
+    argo_version: v3.6.5 # Match version to available manifests
+    argo_host: argo.{{ control_plane_ip }}.nip.io
     argo_nodeport: 30130
-    argo_artifacts_pvc: "argo-artifacts"
-    argo_artifacts_size: "10Gi"
-    argo_github_base_url: "https://github.com/argoproj/argo-workflows/releases"
+    argo_artifacts_pvc: argo-artifacts
+    argo_artifacts_size: 10Gi
+    argo_github_base_url: https://github.com/argoproj/argo-workflows/releases
     argo_install_url: "{{ argo_github_base_url }}/download/{{ argo_version }}/install.yaml"
 
   tasks:
@@ -24,10 +25,12 @@
 
     - name: Fail if kubeconfig doesn't exist
       ansible.builtin.fail:
-        msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml first."
+        msg:
+          Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
+          first.
       when: not kubeconfig_stat.stat.exists
 
-    # 2. Check for previous installation
+      # 2. Check for previous installation
     - name: Check if Argo Workflows is already installed
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} \
@@ -38,9 +41,11 @@
 
     - name: Display Argo installation status
       ansible.builtin.debug:
-        msg: "Argo namespace: {{ 'Already exists' if 'not found' not in argo_ns_check.stdout else 'Will be created' }}"
+        msg:
+          "Argo namespace: {{ 'Already exists' if 'not found' not in argo_ns_check.stdout
+          else 'Will be created' }}"
 
-    # 3. Create namespace if needed
+      # 3. Create namespace if needed
     - name: Create Argo namespace if it doesn't exist
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -53,7 +58,7 @@
       become: false
       when: "'not found' in argo_ns_check.stdout"
 
-    # 4. Create PVC for Argo artifacts
+      # 4. Create PVC for Argo artifacts
     - name: Create PVC for Argo artifacts
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -73,7 +78,7 @@
             storageClassName: nfs-client
       become: false
 
-    # 5. Create ConfigMap for artifact repository configuration
+      # 5. Create ConfigMap for artifact repository configuration
     - name: Create ConfigMap for artifact repository configuration
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -99,7 +104,7 @@
                   key: secretkey
       become: false
 
-    # 6. Create workflow controller ConfigMap
+      # 6. Create workflow controller ConfigMap
     - name: Create workflow controller ConfigMap
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -129,7 +134,7 @@
                     secondsAfterFailure: 7200
       become: false
 
-    # 7. Install Argo Workflows from official manifests
+      # 7. Install Argo Workflows from official manifests
     - name: Install Argo Workflows manifests
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} apply -n {{ argo_namespace }} -f {{ argo_install_url }}
@@ -142,7 +147,7 @@
         msg: "{{ install_result.stdout_lines }}"
       when: install_result.stdout | length > 0
 
-    # 8. Wait for Argo Workflows CRDs to be established
+      # 8. Wait for Argo Workflows CRDs to be established
     - name: Wait for Argo Workflows CRDs to be established
       ansible.builtin.shell: |
         for i in {1..15}; do
@@ -163,7 +168,7 @@
       changed_when: false
       ignore_errors: true
 
-    # 9. Set up RBAC for the default service account
+      # 9. Set up RBAC for the default service account
     - name: Create RBAC for default service account
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -175,16 +180,15 @@
             name: workflow-role
             namespace: "{{ argo_namespace }}"
           rules:
-            - apiGroups: ["argoproj.io"]
+            - apiGroups: [argoproj.io]
               resources:
                 [
-                  "workflows",
-                  "workflowtemplates",
-                  "cronworkflows",
-                  "workflowtaskresults",
+                  workflows,
+                  workflowtemplates,
+                  cronworkflows,
+                  workflowtaskresults,
                 ]
-              verbs:
-                ["create", "get", "list", "watch", "update", "patch", "delete"]
+              verbs: [create, get, list, watch, update, patch, delete]
       register: role_result
       become: false
       ignore_errors: true
@@ -211,7 +215,7 @@
       become: false
       ignore_errors: true
 
-    # 10. Create admin service account for UI access
+      # 10. Create admin service account for UI access
     - name: Create admin service account for Argo UI access
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -288,7 +292,7 @@
       become: false
       ignore_errors: true
 
-    # 11. Configure the Argo Server with correct flags and variables
+      # 11. Configure the Argo Server with correct flags and variables
     - name: Configure Argo Server with correct flags and variables
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -306,9 +310,9 @@
                   - name: argo-server
                     args:
                       - server
-                      - "--auth-mode=server"
-                      - "--access-control-allow-origin=*"
-                      - "--base-href=/"
+                      - --auth-mode=server
+                      - --access-control-allow-origin=*
+                      - --base-href=/
                     readinessProbe:
                       httpGet:
                         path: /
@@ -323,7 +327,7 @@
       become: false
       ignore_errors: true
 
-    # 12. Create NodePort service for direct access
+      # 12. Create NodePort service for direct access
     - name: Create NodePort service for Argo UI
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -346,7 +350,7 @@
               app: argo-server
       become: false
 
-    # 13. Create Traefik IngressRoute
+      # 13. Create Traefik IngressRoute
     - name: Create Traefik IngressRoute for Argo UI with CORS
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -409,6 +413,7 @@
                 kind: Rule
                 middlewares:
                   - name: redirect-to-https
+                  - name: cors
                 services:
                   - name: argo-server
                     port: 2746
@@ -432,7 +437,31 @@
               permanent: true
       become: false
 
-    # Add a comprehensive CORS ConfigMap
+      # Create a CORS middleware for Traefik to ensure CORS headers are preserved:
+    - name: Traefik CORS middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: cors
+            namespace: "{{ argo_namespace }}"
+          spec:
+            accessControlAllowMethods:
+              - GET
+              - POST
+              - PUT
+              - DELETE
+              - OPTIONS
+            accessControlAllowHeaders: "*"
+            accessControlAllowOriginList:
+              - "*"
+            accessControlMaxAge: 100
+            addVaryHeader: true
+
+      # Add a comprehensive CORS ConfigMap
     - name: Create ConfigMap for comprehensive CORS configuration
       kubernetes.core.k8s:
         kubeconfig: "{{ kubeconfig_path }}"
@@ -450,7 +479,7 @@
               corsAllowHeaders: ["Authorization", "Content-Type", "Accept"]
       become: false
 
-    # Add this diagnostic task before the restart
+      # Add this diagnostic task before the restart
     - name: Check for Argo Server network policies
       ansible.builtin.shell: |
         echo "Checking for NetworkPolicies..."
@@ -469,7 +498,7 @@
       changed_when: false
       ignore_errors: true
 
-    # 14. Clean restart with enhanced diagnostics
+      # 14. Clean restart with enhanced diagnostics
     - name: Clean restart Argo components with enhanced diagnostics
       block:
         - name: Scale down deployments
@@ -479,7 +508,7 @@
           register: scale_down
           delegate_to: "{{ groups['utility'][0] }}"
           become: false
-          changed_when: scale_down.rc == 0  # This does change state when successful
+          changed_when: scale_down.rc == 0 # This does change state when successful
           ignore_errors: true
 
         - name: Wait for pods to terminate
@@ -499,7 +528,7 @@
             echo "WARNING: Not all pods terminated after timeout"
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} get pods
           args:
-            executable: /bin/bash  # Add this line
+            executable: /bin/bash # Add this line
           register: termination_wait
           become: false
           changed_when: false
@@ -516,7 +545,7 @@
               echo "No pods remaining"
             fi
           args:
-            executable: /bin/bash  # Add this line
+            executable: /bin/bash # Add this line
           register: force_delete
           become: false
           changed_when: "'Force deleting' in force_delete.stdout"
@@ -553,13 +582,15 @@
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} scale deployment argo-server --replicas=1
           register: scale_up
           become: false
-          changed_when: scale_up.rc == 0  # Add this line to indicate when it changes state
+          changed_when: scale_up.rc == 0 # Add this line to indicate when it changes state
       rescue:
         - name: Display error message for restart failures
           ansible.builtin.debug:
-            msg: "Failed to properly restart Argo components. See error messages above for details."
+            msg:
+              Failed to properly restart Argo components. See error messages above
+              for details.
 
-    # 15. Enhanced deployment status checking with pod diagnostics
+      # 15. Enhanced deployment status checking with pod diagnostics
     - name: Wait for workflow controller with debugging
       ansible.builtin.shell: |
         echo "Checking workflow-controller status..."
@@ -673,13 +704,15 @@
     - name: Display deployment status summary
       ansible.builtin.debug:
         msg:
-          - "==================== ARGO DEPLOYMENT STATUS ===================="
-          - "Workflow Controller: {{ 'READY' if controller_status.rc | default(1) == 0 else 'NOT READY' }}"
-          - "Argo Server: {{ 'READY' if server_status.rc | default(1) == 0 else 'NOT READY' }}"
-          - "See complete logs for debugging information"
-          - "=============================================================="
+          - ==================== ARGO DEPLOYMENT STATUS ====================
+          - "Workflow Controller: {{ 'READY' if controller_status.rc | default(1) == 0
+            else 'NOT READY' }}"
+          - "Argo Server: {{ 'READY' if server_status.rc | default(1) == 0 else 'NOT READY'
+            }}"
+          - See complete logs for debugging information
+          - ==============================================================
 
-    # 16. Create token generation script
+      # 16. Create token generation script
     - name: Create a local script to generate a valid token for Argo UI
       ansible.builtin.copy:
         dest: "{{ playbook_dir }}/generated/get-argo-token.sh"
@@ -718,7 +751,7 @@
       register: token_script
       become: false
 
-    # 17. Get the admin token for display in summary
+      # 17. Get the admin token for display in summary
     - name: Wait for token to be populated
       ansible.builtin.pause:
         seconds: 5
@@ -731,7 +764,7 @@
       changed_when: false
       ignore_errors: true
 
-    # 18. Create a basic workflow template example if CRDs are ready
+      # 18. Create a basic workflow template example if CRDs are ready
     - name: Create example workflow template using kubectl
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} apply -f - <<EOF
@@ -758,7 +791,7 @@
       ignore_errors: true
       when: crd_check.rc == 0
 
-    # 19. Submit a test workflow using kubectl
+      # 19. Submit a test workflow using kubectl
     - name: Submit test workflow using kubectl
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argo_namespace }} create -f - <<EOF
@@ -781,37 +814,43 @@
       ignore_errors: true
       when: crd_check.rc == 0
 
-    # 20. Test Argo UI access via NodePort
+      # 20. Test Argo UI access via NodePort
     - name: Test Argo UI access via NodePort
       ansible.builtin.uri:
-        url: "https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
+        url: https://{{ control_plane_ip }}:{{ argo_nodeport }}/
         method: GET
         return_content: false
-        status_code: [200, 301, 302, 401, 403]  # Accept various common status codes as success
-        validate_certs: false  # Since we're using self-signed certificates
+        status_code: [200, 301, 302, 401, 403] # Accept various common status codes as success
+        validate_certs: false # Since we're using self-signed certificates
         timeout: 10
       register: argo_ui_access
       become: false
       ignore_errors: true
 
-    # 21. Variables for Argo Workflows installation summary
+      # 21. Variables for Argo Workflows installation summary
     - name: Set status variables for summary
       ansible.builtin.set_fact:
         argo_server_status: >-
-          {% if argo_server_rollout is defined and argo_server_rollout.rc is defined %}
-          {{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment had issues' }}
+          {% if argo_server_rollout is defined and argo_server_rollout.rc is defined
+          %}
+          {{ 'Successfully deployed' if argo_server_rollout.rc == 0 else 'Deployment
+          had issues' }}
           {% else %}Status unknown{% endif %}
         argo_controller_status: >-
-          {% if argo_controller_rollout is defined and argo_controller_rollout.rc is defined %}
-          {{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment had issues' }}
+          {% if argo_controller_rollout is defined and argo_controller_rollout.rc is
+          defined %}
+          {{ 'Successfully deployed' if argo_controller_rollout.rc == 0 else 'Deployment
+          had issues' }}
           {% else %}Status unknown{% endif %}
         auth_config_status: >-
           {% if server_config_result is defined %}
-          {{ 'Yes' if server_config_result.changed | default(false) else 'No - may need manual configuration' }}
+          {{ 'Yes' if server_config_result.changed | default(false) else 'No - may need
+          manual configuration' }}
           {% else %}Status unknown{% endif %}
         template_status: >-
           {% if template_result is defined and template_result.rc is defined %}
-          {{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready yet' }}
+          {{ 'Created' if template_result.rc == 0 else 'Failed - CRDs may not be ready
+          yet' }}
           {% else %}Not created{% endif %}
         ui_access_status: >-
           {% if argo_ui_access is defined and argo_ui_access.stdout is defined %}
@@ -819,7 +858,8 @@
           {% else %}Failed - see verification output{% endif %}
         test_workflow_status: >-
           {% if test_workflow is defined and test_workflow.rc is defined %}
-          {{ 'Submitted successfully' if test_workflow.rc == 0 else 'Failed - see verification output' }}
+          {{ 'Submitted successfully' if test_workflow.rc == 0 else 'Failed - see verification
+          output' }}
           {% else %}Not submitted{% endif %}
         crd_status: >-
           {% if crd_check is defined and crd_check.rc is defined %}
@@ -829,8 +869,8 @@
     - name: Display Argo Workflows installation summary
       ansible.builtin.debug:
         msg:
-          - "==================== ARGO WORKFLOWS INSTALLATION SUMMARY ===================="
-          - "Argo Workflows has been installed using the official manifests."
+          - ==================== ARGO WORKFLOWS INSTALLATION SUMMARY ====================
+          - Argo Workflows has been installed using the official manifests.
           - ""
           - "Access URLs:"
           - "- Argo UI via NodePort: https://{{ control_plane_ip }}:{{ argo_nodeport }}/"
@@ -856,9 +896,9 @@
           - "- CRD Status: {{ crd_status }}"
           - ""
           - "Next Steps:"
-          - "1. Access the Argo UI to view and manage workflows"
-          - "2. Use the example template to create your own workflows"
-          - "3. For CLI usage, install the argo CLI tool"
+          - 1. Access the Argo UI to view and manage workflows
+          - 2. Use the example template to create your own workflows
+          - 3. For CLI usage, install the argo CLI tool
           - ""
           - "Verify installation with: ansible-playbook -i inventory/hosts verify_130_argo_workflows.yml"
-          - "=================================================================="
+          - ==================================================================

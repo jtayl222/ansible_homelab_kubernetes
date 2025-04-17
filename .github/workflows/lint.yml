@@ -18,7 +18,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'  # or match your local version
+          python-version: '3.11'    # or match your local version
 
       - name: Install pre-commit and dependencies
         run: |
@@ -31,7 +31,7 @@ jobs:
 
       - name: Check Ansible playbook syntax
         run: |
-          ansible-playbook site.yml --syntax-check
+          ansible-playbook install_010_site.yml --syntax-check
 
       - name: Run pre-commit hooks
         run: pre-commit run --all-files --show-diff-on-failure
