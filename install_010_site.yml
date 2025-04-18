@@ -44,7 +44,7 @@
 
 - name: Deploy Argo Workflows
   import_playbook: install_130_argo_workflows.yml
-  tags: [workflow, argo]
+  tags: [workflow, argowf]
 
 - name: Deploy minio
   import_playbook: install_140_minio.yml

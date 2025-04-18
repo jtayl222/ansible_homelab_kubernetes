@@ -49,10 +49,10 @@ echo
 echo "[CHECK] MLflow"
 curl -s -I http://mlflow.local/ | head -1 || echo "MLflow check failed"
 
-# 8. Verify Argo Workflows (assuming argo.local)
+# 8. Verify Argo Workflows (assuming argowf.local)
 echo
 echo "[CHECK] Argo Workflows UI"
-curl -s -I http://argo.local/ | head -1 || echo "Argo check failed"
+curl -s -I http://argowf.local/ | head -1 || echo "Argo Workflows check failed"
 
 # 9. Verify MinIO
 echo

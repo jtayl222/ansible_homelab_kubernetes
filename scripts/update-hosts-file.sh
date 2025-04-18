@@ -234,7 +234,7 @@ $CONTROL_PLANE_IP    mlflow.local
 $CONTROL_PLANE_IP    minio.local
 $CONTROL_PLANE_IP    seldon.local
 $CONTROL_PLANE_IP    iris.local
-$CONTROL_PLANE_IP    argo.local
+$CONTROL_PLANE_IP    argowf.local
 $CONTROL_PLANE_IP    traefik.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    dashboard.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    grafana.$CONTROL_PLANE_IP.nip.io
@@ -244,7 +244,7 @@ $CONTROL_PLANE_IP    mlflow.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    minio.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    minio-console.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    seldon.$CONTROL_PLANE_IP.nip.io
-$CONTROL_PLANE_IP    argo.$CONTROL_PLANE_IP.nip.io
+$CONTROL_PLANE_IP    argowf.$CONTROL_PLANE_IP.nip.io
 $CONTROL_PLANE_IP    whoami.$CONTROL_PLANE_IP.nip.io
 # Kubernetes homelab services end"
 
@@ -263,7 +263,7 @@ declare -a SERVICES=(
     "mlflow.local:80:/"
     "minio.local:80:/"
     "seldon.local:80:/seldon/"
-    "argo.local:443:/"
+    "argowf.local:443:/"
 )
 
 # Test connectivity to each service
@@ -325,7 +325,7 @@ echo ""
 echo "Seldon:             http://seldon.local/seldon/"
 echo "                    http://seldon.$CONTROL_PLANE_IP.nip.io/seldon/"
 echo ""
-echo "Argo Workflows:     https://argo.local/"
-echo "                    https://argo.$CONTROL_PLANE_IP.nip.io/"
+echo "Argo Workflows:     https://argowf.local/"
+echo "                    https://argowf.$CONTROL_PLANE_IP.nip.io/"
 echo "                    https://$CONTROL_PLANE_IP:30130/"
 echo -e "${GREEN}*******************************************************************${NC}"
