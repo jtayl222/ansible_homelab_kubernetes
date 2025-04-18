@@ -1,0 +1,20 @@
+---
+- name: Deploy demo iris pipeline Argo CD Application
+  hosts: localhost
+  gather_facts: false
+  vars:
+    homelab_repo_url: https://github.com/jtayl222/homelab-mlops-demo.git
+    homelab_repo_path: /tmp/homelab-mlops-demo
+
+  tasks:
+    - name: Clone homelab-mlops-demo repository
+      ansible.builtin.git:
+        repo: "{{ homelab_repo_url }}"
+        dest: "{{ homelab_repo_path }}"
+        version: main
+        force: yes
+
+    - name: Apply Argo CD Application manifest
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ homelab_repo_path }}/applications/demo-iris-pipeline-app.yaml"
