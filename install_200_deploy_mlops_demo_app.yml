@@ -14,6 +14,16 @@
         version: main
         force: yes
 
+    - name: Apply RBAC and Secret configurations
+      kubernetes.core.k8s:
+        state: present
+        src: "{{ item }}"
+      loop:
+        - "{{ homelab_repo_path }}/applications/argocd-workflow-rbac.yaml"
+        - "{{ homelab_repo_path }}/applications/argowf-seldon-rbac.yaml"
+        - "{{ homelab_repo_path }}/applications/sealed-minio-secret-cd.yaml"
+        - "{{ homelab_repo_path }}/applications/sealed-minio-secret-wf.yaml"
+
     - name: Apply Argo CD Application manifest
       kubernetes.core.k8s:
         state: present
