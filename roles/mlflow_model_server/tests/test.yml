@@ -1,0 +1,6 @@
+---
+- name: Test mlflow_model_server role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - mlflow_model_server

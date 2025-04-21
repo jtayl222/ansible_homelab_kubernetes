@@ -2,7 +2,7 @@
   ansible.builtin.get_url:
     url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
     dest: /tmp/get_helm.sh
-    mode: "0700"
+    mode: '0700'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
@@ -15,14 +15,16 @@
 
 - name: Ensure required variables are defined
   ansible.builtin.set_fact:
-    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address']) }}"
-    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig') }}"
+    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address'])
+      }}"
+    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig')
+      }}"
 
 - name: Check if Kubernetes Dashboard is already installed
   ansible.builtin.command: helm list -n kubernetes-dashboard -q
   register: dashboard_installed
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   changed_when: false
@@ -31,7 +33,7 @@
   ansible.builtin.command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
   when: "'kubernetes-dashboard' in dashboard_installed.stdout"
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   changed_when: true  # This actually changes state by uninstalling
@@ -39,7 +41,7 @@
 - name: Add Kubernetes Dashboard Helm repository
   ansible.builtin.command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   register: repo_add_result
@@ -51,7 +53,7 @@
 - name: Update Helm repositories
   ansible.builtin.command: helm repo update
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   changed_when: true  # Helm repo update always refreshes state
@@ -61,7 +63,7 @@
     helm install kubernetes-dashboard k8s-dashboard/kubernetes-dashboard
     --namespace kubernetes-dashboard --create-namespace
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   register: install_result
@@ -69,7 +71,7 @@
 
 - name: Create dashboard admin service account
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
@@ -82,7 +84,7 @@
 
 - name: Create cluster role binding for dashboard admin
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: rbac.authorization.k8s.io/v1
@@ -102,7 +104,7 @@
 
 - name: Create long-lived token for dashboard admin
   kubernetes.core.k8s:
-    kubeconfig: "{{ kubeconfig }}"
+    kubeconfig: '{{ kubeconfig }}'
     state: present
     definition:
       apiVersion: v1
@@ -135,14 +137,15 @@
     dest: /tmp/dashboard-ingress.yml
     mode: '0600'  # Restricted permissions since it might contain sensitive info
   vars:
-    dashboard_node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default('192.168.1.100') }}"
+    dashboard_node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+      | default('192.168.1.100') }}"
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
 
 - name: Apply Ingress for Kubernetes Dashboard
   ansible.builtin.command: kubectl apply -f /tmp/dashboard-ingress.yml
   environment:
-    KUBECONFIG: "{{ kubeconfig }}"
+    KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['utility'][0] }}"
   become: false
   register: apply_result

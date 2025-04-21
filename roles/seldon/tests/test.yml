@@ -1,0 +1,6 @@
+---
+- name: Test seldon role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - seldon

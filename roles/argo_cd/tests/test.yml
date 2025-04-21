@@ -1,0 +1,6 @@
+---
+- name: Test argo_cd role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - argo_cd

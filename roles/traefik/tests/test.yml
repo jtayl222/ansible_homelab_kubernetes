@@ -1,0 +1,6 @@
+---
+- name: Test traefik role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - traefik

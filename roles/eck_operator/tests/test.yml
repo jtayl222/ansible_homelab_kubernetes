@@ -1,0 +1,6 @@
+---
+- name: Test eck_operator role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - eck_operator
