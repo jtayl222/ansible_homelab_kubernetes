@@ -1,2 +1,83 @@
-null
-...
+- name: Set control plane endpoint fact
+  ansible.builtin.set_fact:
+    k3s_control_plane_endpoint: "{{ groups['k3s_control_plane'][0] }}"
+
+- name: Fetch k3s token from control node
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: node_token_b64
+  delegate_to: "{{ k3s_control_plane_endpoint }}"
+
+- name: Set k3s token fact
+  ansible.builtin.set_fact:
+    k3s_token: "{{ node_token_b64['content'] | b64decode | trim }}"
+
+- name: Get control node IP
+  ansible.builtin.set_fact:
+    k3s_control_plane_endpoint_ip:
+      "{{
+        hostvars[k3s_control_plane_endpoint]['ansible_host'] |
+        default(hostvars[k3s_control_plane_endpoint]['ansible_default_ipv4']['address'])
+      }}"
+
+- name: Install prerequisites
+  ansible.builtin.apt:
+    name:
+      - curl
+      - apt-transport-https
+    state: present
+    update_cache: yes
+  become: true
+
+- name: Install networking diagnostic utilities
+  ansible.builtin.apt:
+    name:
+      - net-tools
+      - netcat-openbsd
+      - curl
+      - traceroute
+      - iproute2
+      - iputils-ping
+      - dnsutils
+    state: present
+    update_cache: yes
+  become: true
+
+- name: Download k3s install script
+  ansible.builtin.get_url:
+    url: https://get.k3s.io
+    dest: /tmp/k3s-install.sh
+    mode: "0755"
+  become: true
+
+- name: Install k3s worker
+  ansible.builtin.shell: |
+    export K3S_URL="https://{{ k3s_control_plane_endpoint_ip }}:6443"
+    export K3S_TOKEN="{{ k3s_token }}"
+    /tmp/k3s-install.sh
+  args:
+    creates: /usr/local/bin/k3s
+    executable: /bin/bash
+  become: true
+
+- name: Ensure k3s service is enabled and started
+  ansible.builtin.systemd:
+    name: k3s-agent  # Worker node service name
+    enabled: yes
+    state: started
+  become: true
+
+- name: Wait for node to register
+  ansible.builtin.pause:
+    seconds: 10
+
+- name: Verify k3s worker node status (from control plane)
+  ansible.builtin.command: kubectl get nodes
+  register: nodes_status
+  delegate_to: "{{ k3s_control_plane_endpoint }}"
+  become: true
+  changed_when: false
+
+- name: Display nodes status
+  ansible.builtin.debug:
+    msg: "{{ nodes_status.stdout_lines }}"

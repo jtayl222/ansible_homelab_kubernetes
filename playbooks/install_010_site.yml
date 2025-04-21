@@ -1,10 +1,6 @@
-- name: Setup K3s Control Plane
-  import_playbook: install_020_k3s_control_plane.yml
-  tags: [k3s, control_plane]
-
-- name: Setup K3s Worker Nodes
-  import_playbook: install_030_k3s_workers.yml
-  tags: [k3s, workers]
+- name: Setup K3s
+  import_playbook: k3s.yml
+  tags: [k3s, control_plane, workers]
 
 - name: Configure NFS Storage
   import_playbook: install_040_nfs_server.yml
