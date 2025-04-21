@@ -48,7 +48,7 @@
                       resources:
                         requests:
                           storage: 10Gi
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Wait for Elasticsearch to be ready
@@ -59,7 +59,7 @@
       retries: 50
       delay: 15
       until: es_health.stdout == "green"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
 
@@ -83,7 +83,7 @@
                 targetPort: 9200
                 nodePort: 30092
             type: NodePort
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Get elastic user password
@@ -94,7 +94,7 @@
       args:
         executable: /bin/bash
       register: elastic_password
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       no_log: true
@@ -108,7 +108,7 @@
       until: es_pod_name.stdout != ""
       retries: 10
       delay: 5
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This command doesn't change anything, it just retrieves info
 
@@ -125,7 +125,7 @@
           type: Opaque
           stringData:
             kibana-password: "{{ kibana_password }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Verify kibana_system role exists
@@ -135,7 +135,7 @@
             curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
               "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
       register: kibana_role_check
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just a check, it doesn't change anything
       ignore_errors: true
@@ -167,7 +167,7 @@
           "run_as": []
         }'
       register: kibana_role_create
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: kibana_role_create.rc == 0 and "error" not in kibana_role_create.stdout
       when: "'kibana_system' not in kibana_role_check.stdout"
@@ -188,7 +188,7 @@
             }
         }'
       register: kibana_user_create
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: kibana_user_create.rc == 0 and "error" not in kibana_user_create.stdout
       ignore_errors: true
@@ -203,7 +203,7 @@
       args:
         executable: /bin/bash
       register: kibana_auth_test
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just a test/verification, it doesn't change state
       ignore_errors: true
@@ -240,7 +240,7 @@
             stripPrefix:
               prefixes:
                 - /elasticsearch
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: elasticsearch_direct_access | default(false) | bool
 
@@ -267,7 +267,7 @@
                     port: 9200
                     scheme: https
                     serversTransport: insecure-transport
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: elasticsearch_direct_access | default(false) | bool
 
@@ -291,6 +291,6 @@
                 name: https
             selector:
               common.k8s.elastic.co/type: elasticsearch
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: elasticsearch_direct_access | default(false) | bool

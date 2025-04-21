@@ -1,2 +1,70 @@
-null
-...
+- name: Install NFS client packages
+  ansible.builtin.apt:
+    name:
+      - nfs-common
+      - rpcbind
+    state: present
+    update_cache: yes
+  become: true
+
+- name: Ensure rpcbind service is running
+  ansible.builtin.systemd:
+    name: rpcbind
+    state: started
+    enabled: yes
+  become: true
+
+- name: Create test mount point
+  ansible.builtin.file:
+    path: /mnt/nfs_test
+    state: directory
+    mode: "0777"
+  become: true
+
+- name: Test NFS mount from server
+  ansible.posix.mount:
+    path: /mnt/nfs_test
+    src: "{{ nfs_server }}:/{{ nfs_path }}"
+    fstype: nfs
+    opts: noatime,soft
+    state: mounted
+  register: mount_test
+  failed_when:
+    - mount_test is failed
+    - "'already mounted' not in mount_test.msg|default('')"
+  become: true
+
+- name: Try writing to NFS mount
+  ansible.builtin.shell: |
+    echo "Test from {{ inventory_hostname }} at $(date)" > /mnt/nfs_test/client_test_{{ inventory_hostname }}.txt
+  register: nfs_write_test
+  when: mount_test is success
+  changed_when: nfs_write_test.rc == 0  # Consider changed only when command succeeds
+  failed_when:
+    - nfs_write_test.rc != 0  # Command failed
+    - not (
+        'Permission denied' in nfs_write_test.stderr | default('') or
+        'Read-only file system' in nfs_write_test.stderr | default('') or
+        'No space left' in nfs_write_test.stderr | default('')
+      )  # But ignore common NFS-related errors
+  become: true
+
+- name: Clean up test mount
+  ansible.posix.mount:
+    path: /mnt/nfs_test
+    state: absent
+  when: mount_test is success
+  become: true
+
+- name: Remove test mount point
+  ansible.builtin.file:
+    path: /mnt/nfs_test
+    state: absent
+  become: true
+
+- name: Display client setup status
+  ansible.builtin.debug:
+    msg:
+      - NFS client configured on {{ inventory_hostname }}
+      - "Connection test to NFS server: {{ 'SUCCESS' if mount_test is success else
+        'FAILED - please check NFS server' }}"

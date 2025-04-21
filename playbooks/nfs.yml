@@ -1,0 +1,30 @@
+# playbooks/nfs.yml
+---
+# Then proceed with NFS server setup
+- name: Install and configure NFS server
+  hosts: nfs_server
+  become: true
+  roles:
+    - nfs_server
+
+- name: Install and configure NFS clients
+  hosts: nfs_clients
+  become: true
+  vars_files:
+    - ../group_vars/all/nfs.yml
+  roles:
+    - nfs_clients
+
+- name: Deploy NFS provisioner on Kubernetes
+  hosts: localhost
+  connection: local
+  vars_files:
+    - ../group_vars/all/kubernetes.yml
+    - ../group_vars/all/nfs.yml
+  pre_tasks:
+    # Double-check the kubeconfig path exists
+    - name: Ensure kubeconfig path exists
+      ansible.builtin.stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_check
+      delegate_to: localhost

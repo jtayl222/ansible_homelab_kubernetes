@@ -19,14 +19,14 @@
       loop:
         - "{{ playbook_dir }}/fetched_tokens"
         - "{{ playbook_dir }}/scripts"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Check if kubeconfig exists
       ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Fetch kubeconfig from k3s server
@@ -41,7 +41,7 @@
         path: "{{ kubeconfig_path }}"
         regexp: https://127.0.0.1:6443
         replace: https://{{ node_ip }}:6443
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: not kubeconfig_stat.stat.exists
 
@@ -49,7 +49,7 @@
       ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_verify
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Fail if kubeconfig still doesn't exist
@@ -58,7 +58,7 @@
           Kubeconfig file not found at {{ kubeconfig_path }}. Check permissions and
           connectivity.
       when: not kubeconfig_verify.stat.exists
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Add Prometheus Helm repository
@@ -66,14 +66,14 @@
         name: prometheus-community
         repo_url: https://prometheus-community.github.io/helm-charts
         kubeconfig: "{{ kubeconfig_path }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Fail if Prometheus already exists
     - name: Check if Prometheus release exists
       ansible.builtin.shell: |
         helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       register: existing_prometheus
       changed_when: false
       failed_when: false
@@ -92,7 +92,7 @@
         api_version: v1
         kind: Namespace
         state: present
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Grafana and Prometheus middlewares
@@ -112,7 +112,7 @@
       loop:
         - name: grafana
         - name: prometheus
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create monitoring headers middleware
@@ -129,7 +129,7 @@
             headers:
               customRequestHeaders:
                 X-Forwarded-Proto: http
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create CRD installation script
@@ -151,13 +151,13 @@
           for CRD in alertmanagerconfigs alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
             kubectl --kubeconfig=$KUBECONFIG wait --for condition=established --timeout=60s crd/${CRD}.monitoring.coreos.com
           done
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Run CRD installation script
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: crd_installation
       changed_when: true
@@ -210,7 +210,7 @@
           kubelet:
             serviceMonitor:
               namespace: "{{ prometheus_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: prometheus_installation
 
@@ -243,7 +243,7 @@
                 middlewares:
                   - name: grafana-strip-prefix
                   - name: monitoring-headers
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Update Grafana configuration via Helm values
@@ -264,7 +264,7 @@
             config:
               route:
                 receiver: "null"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Restart Grafana pods to apply configuration
@@ -272,7 +272,7 @@
         kubectl --kubeconfig="{{ kubeconfig_path }}" rollout restart deployment {{ prometheus_release_name }}-grafana -n {{ prometheus_namespace }}
       register: restart_result
       changed_when: restart_result.rc == 0  # This will mark the task as changed when the command succeeds
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Wait for deployments to be ready
@@ -291,7 +291,7 @@
       loop:
         - prometheus-grafana
         - prometheus-kube-prometheus-operator
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Get Traefik NodePort information
@@ -299,7 +299,7 @@
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get svc traefik -n {{ traefik_namespace }} \
            -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: traefik_nodeport
       changed_when: false
@@ -312,7 +312,7 @@
           -o jsonpath="{.data.admin-password}" | base64 --decode
       args:
         executable: /bin/bash
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: grafana_password
       changed_when: false

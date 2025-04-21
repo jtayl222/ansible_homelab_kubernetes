@@ -25,7 +25,7 @@
       loop:
         - elasticsearch
         - kibana
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: delete_result
       failed_when:
@@ -47,7 +47,7 @@
       loop:
         - elasticsearch
         - kibana
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: delete_result
       failed_when:
@@ -69,7 +69,7 @@
       loop:
         - elasticsearch
         - kibana
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: delete_result
       failed_when:
@@ -91,7 +91,7 @@
       loop:
         - elasticsearch-es-nodeport
         - kibana-kb-nodeport
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_nodeport_result
       failed_when:
@@ -111,7 +111,7 @@
           metadata:
             name: kibana
             namespace: "{{ elastic_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_kibana_result
       failed_when:
@@ -128,7 +128,7 @@
       until: kibana_deleted.stdout | int > 0 or kibana_deleted.rc != 0
       retries: 10
       delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true
@@ -143,7 +143,7 @@
           metadata:
             name: elasticsearch
             namespace: "{{ elastic_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_elasticsearch_result
       failed_when:
@@ -160,7 +160,7 @@
       until: elasticsearch_deleted.stdout | int > 0 or elasticsearch_deleted.rc != 0
       retries: 12
       delay: 15
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true
@@ -174,7 +174,7 @@
           kind: Namespace
           metadata:
             name: "{{ elastic_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_namespace_result
       failed_when:
@@ -190,7 +190,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/operator.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_operator_result
       failed_when:
@@ -207,7 +207,7 @@
       until: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
       retries: 10
       delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true
@@ -218,7 +218,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/crds.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_crds_result
       failed_when:
@@ -236,7 +236,7 @@
           kind: Namespace
           metadata:
             name: "{{ operator_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: remove_operator_ns_result
       failed_when:
@@ -252,7 +252,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} \
           get pvc --all-namespaces | grep elasticsearch-data || true
       register: leftover_pvcs
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true

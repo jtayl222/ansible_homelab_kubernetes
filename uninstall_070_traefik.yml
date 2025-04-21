@@ -160,7 +160,7 @@
       ansible.builtin.file:
         path: "{{ playbook_dir }}/generated/dashboard.sh"
         state: absent
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     # SECTION: CLEANUP - Remove temporary files and scripts
@@ -208,7 +208,7 @@
         - /tmp/traefik-crds.yaml
         - /tmp/whoami-test.yaml
         - /tmp/reset-traefik-config.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       failed_when:
         - temp_removal.failed is defined
         - temp_removal.failed

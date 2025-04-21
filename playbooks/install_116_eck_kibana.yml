@@ -19,7 +19,7 @@
       until: es_health.stdout == "green"
       retries: 5
       delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
 
@@ -28,7 +28,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           delete kibana kibana --wait=false
       register: kibana_delete
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - kibana_delete.rc != 0
@@ -48,7 +48,7 @@
           delete service kibana-kb-nodeport --wait=false
       register: kibana_manual_delete
       changed_when: kibana_manual_delete.rc == 0 and kibana_manual_delete.stdout != ""
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
 
@@ -61,7 +61,7 @@
       retries: 15
       delay: 5
       changed_when: false  # This is just checking status, not making changes
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
 
@@ -73,7 +73,7 @@
       args:
         executable: /bin/bash
       register: elastic_password
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       no_log: true
@@ -86,7 +86,7 @@
       args:
         executable: /bin/bash
       register: kibana_password_from_secret
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       no_log: true
@@ -105,7 +105,7 @@
           stringData:
             username: kibana_system
             password: "{{ kibana_password_from_secret.stdout }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Wait for ES pod for exec commands
@@ -118,7 +118,7 @@
       retries: 10
       delay: 5
       changed_when: false  # Add this line
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create kibana_system user in Elasticsearch - Check if exists
@@ -132,7 +132,7 @@
         executable: /bin/bash
       register: kibana_user_exists
       changed_when: false  # Add this line
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
 
@@ -147,7 +147,7 @@
       when: kibana_user_exists.stdout != "not_found"
       register: kibana_pwd_update
       changed_when: kibana_pwd_update.rc == 0 and "error" not in kibana_pwd_update.stdout  # Add this line
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
 
@@ -161,7 +161,7 @@
             -d '{"password":"{{ kibana_password_from_secret.stdout }}", "roles":["kibana_system"]}'
       register: create_user
       when: kibana_user_exists.stdout == "not_found"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: create_user.rc == 0 and "error" not in create_user.stdout
       failed_when:
@@ -178,7 +178,7 @@
       args:
         executable: /bin/bash
       register: kibana_auth_test
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This just tests authentication
       failed_when: kibana_auth_test.rc != 0 and kibana_auth_test.rc != 1
@@ -190,7 +190,7 @@
             curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
               "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
       register: kibana_role_check
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just checking if role exists
       failed_when: false  # We're handling failures with the output
@@ -222,7 +222,7 @@
               "run_as": []
             }'
       register: kibana_role_create
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       when: "'kibana_system' not in kibana_role_check.stdout"
@@ -244,7 +244,7 @@
             -H "Content-Type: application/json" \
             -d '{"password":"{{ kibana_password_from_secret.stdout }}", "roles":["kibana_system"]}'
       register: recreate_user
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: "'kibana_system' not in kibana_auth_test.stdout"
       changed_when: recreate_user.rc == 0
@@ -262,7 +262,7 @@
       args:
         executable: /bin/bash
       register: kibana_auth_test_again
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just a test, no state change
       ignore_errors: true
@@ -276,7 +276,7 @@
       args:
         executable: /bin/bash
       register: es_ca_cert
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
 
@@ -311,7 +311,7 @@
               xpack.security.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
               xpack.encryptedSavedObjects.encryptionKey: "fhjskloppd678ehkdfdlliverpoolfcr"
               logging.root.level: info
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Elasticsearch CA certificate secret
@@ -327,7 +327,7 @@
           type: Opaque
           stringData:
             ca.crt: "{{ es_ca_cert.stdout }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create self-signed certificate for Kibana
@@ -339,7 +339,7 @@
           -subj "/CN=kibana"
       register: cert_creation
       changed_when: cert_creation.rc == 0  # Changed when successful certificate creation
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Kibana TLS secret
@@ -356,7 +356,7 @@
           data:
             tls.crt: "{{ lookup('file', '/tmp/kibana-certs/tls.crt') | b64encode }}"
             tls.key: "{{ lookup('file', '/tmp/kibana-certs/tls.key') | b64encode }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Kibana strip-prefix middleware
@@ -373,7 +373,7 @@
             stripPrefix:
               prefixes:
                 - /kibana
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create ServersTransport for insecure HTTPS
@@ -388,7 +388,7 @@
             namespace: "{{ elastic_namespace }}"
           spec:
             insecureSkipVerify: true
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create consolidated Kibana IngressRoute for HTTP
@@ -427,7 +427,7 @@
                     port: 5601
                     scheme: https
                     serversTransport: insecure-transport
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create consolidated Kibana IngressRoute for HTTPS
@@ -466,7 +466,7 @@
                     port: 5601
                     scheme: https
                     serversTransport: insecure-transport
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Check current Kibana configuration
@@ -477,7 +477,7 @@
         name: kibana
         namespace: "{{ elastic_namespace }}"
       register: kibana_config
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Update Kibana with basePath configuration
@@ -498,7 +498,7 @@
             config:
               server.basePath: /kibana
               server.rewriteBasePath: true
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: >
         kibana_config.resources is defined and
@@ -598,7 +598,7 @@
                   - name: kibana-tls-vol
                     secret:
                       secretName: kibana-tls
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Kibana service
@@ -619,7 +619,7 @@
                 port: 5601
                 targetPort: 5601
             type: ClusterIP
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Kibana NodePort service
@@ -641,14 +641,14 @@
                 targetPort: 5601
                 nodePort: "{{ kibana_nodeport }}"
             type: NodePort
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Wait for Kibana deployment to start
       ansible.builtin.shell: |
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} rollout status deployment/kibana
       register: rollout_status
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just checking status, not making changes
       ignore_errors: true
@@ -658,7 +658,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get pods -l app=kibana -o jsonpath='{.items[0].metadata.name}'
       register: kibana_pod_name
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just retrieving info, not changing state
       ignore_errors: true
@@ -668,7 +668,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           logs {{ kibana_pod_name.stdout }} || echo "No logs available yet"
       register: kibana_logs
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false  # This is just reading logs, not changing state
       failed_when:

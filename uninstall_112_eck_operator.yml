@@ -18,7 +18,7 @@
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/operator.yaml
         register: remove_operator_result
-        delegate_to: "{{ groups['utility'][0] }}"
+        delegate_to: "{{ groups['ansible_controller'][0] }}"
         become: false
         failed_when:
           - remove_operator_result.failed is defined
@@ -37,7 +37,7 @@
       until: operator_deleted.stdout | int > 0 or operator_deleted.rc != 0
       retries: 10
       delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true
@@ -49,7 +49,7 @@
         state: absent
         src: https://download.elastic.co/downloads/eck/2.9.0/crds.yaml
         register: remove_crds_result
-        delegate_to: "{{ groups['utility'][0] }}"
+        delegate_to: "{{ groups['ansible_controller'][0] }}"
         become: false
         failed_when:
           - remove_crds_result.failed is defined
@@ -70,7 +70,7 @@
           metadata:
             name: "{{ elastic_namespace }}"
       register: remove_elastic_ns_result
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - remove_elastic_ns_result.failed is defined
@@ -91,7 +91,7 @@
           metadata:
             name: "{{ operator_namespace }}"
       register: remove_operator_ns_result
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - remove_operator_ns_result.failed is defined

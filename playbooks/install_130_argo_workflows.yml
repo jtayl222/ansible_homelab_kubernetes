@@ -449,7 +449,7 @@
             kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
               scale deployment --all --replicas=0
           register: scale_down
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           changed_when: scale_down.rc == 0 # This does change state when successful
           ignore_errors: true

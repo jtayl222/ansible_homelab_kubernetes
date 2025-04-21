@@ -14,7 +14,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get elasticsearch elasticsearch -o name
       register: elasticsearch_cr_exists
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -24,7 +24,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get elasticsearch elasticsearch -o jsonpath='{.status.health}'
       register: elasticsearch_health
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -35,7 +35,7 @@
           get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
           -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
       register: elasticsearch_pods
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -45,7 +45,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get elasticsearch elasticsearch -o jsonpath='{.spec.version}'
       register: elasticsearch_version
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -56,7 +56,7 @@
           get pvc -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
           -o jsonpath='{.items[*].status.phase}' | tr ' ' '\n' | sort | uniq -c
       register: elasticsearch_storage
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -66,7 +66,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get endpoints elasticsearch-es-http -o jsonpath='{.subsets[0].addresses[0].ip}'
       register: elasticsearch_endpoint
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -76,7 +76,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get svc elasticsearch-es-nodeport -o jsonpath='{.spec.ports[0].nodePort}'
       register: elasticsearch_nodeport
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -87,7 +87,7 @@
         run curl-test --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- \
           curl -k -s -o /dev/null -w "%{http_code}" --connect-timeout 5 https://elasticsearch-es-http:9200
       register: elasticsearch_internal_access
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -101,7 +101,7 @@
         status_code: [200, 201, 300, 301, 302, 303, 307, 308, 401, 403, 404, 500, 502, 503]  # Accept any status code
         timeout: 5  # Equivalent to curl's --connect-timeout
       register: elasticsearch_nodeport_access
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when: false  # Better practice than ignore_errors
       when: elasticsearch_nodeport.rc == 0
@@ -111,7 +111,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
           get secret elasticsearch-es-elastic-user -o name
       register: elasticsearch_secret
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -125,7 +125,7 @@
             curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 \
               https://elasticsearch-es-http:9200
       register: elasticsearch_internal_auth
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -136,7 +136,7 @@
           get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d)
         curl -k -s -o /dev/null -w "%{http_code}" -u "elastic:$PASSWORD" --connect-timeout 5 https://{{ control_plane_ip }}:{{ elasticsearch_nodeport.stdout }}
       register: elasticsearch_external_auth
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -183,7 +183,7 @@
           describe pod -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
             | grep -A5 "Conditions:" || echo "No detailed conditions found"
       register: pod_conditions
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false
@@ -200,7 +200,7 @@
           run health-check --image=curlimages/curl:7.83.1 --rm -i --restart=Never -- \
             curl -k -s -u "elastic:$PASSWORD" https://elasticsearch-es-http:9200/_cluster/health
       register: cluster_health
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       ignore_errors: true
       changed_when: false

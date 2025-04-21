@@ -3,16 +3,8 @@
   tags: [k3s, control_plane, workers]
 
 - name: Configure NFS Storage
-  import_playbook: install_040_nfs_server.yml
-  tags: [storage, nfs, server]
-
-- name: Configure NFS Storage
-  import_playbook: install_050_nfs_clients.yml
-  tags: [storage, nfs, clients]
-
-- name: Configure NFS Storage
-  import_playbook: install_060_nfs_provisioner.yml
-  tags: [storage, nfs, provisioner]
+  import_playbook: nfs.yml
+  tags: [storage, nfs, nfs-server, nfs-clients, nfs-provisioner]
 
 - name: Deploy Traefik
   import_playbook: install_070_traefik.yml

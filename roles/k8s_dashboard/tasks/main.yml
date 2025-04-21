@@ -3,14 +3,14 @@
     url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
     dest: /tmp/get_helm.sh
     mode: '0700'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Install Helm
   ansible.builtin.command: /tmp/get_helm.sh
   args:
     creates: /usr/local/bin/helm
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Ensure required variables are defined
@@ -25,7 +25,7 @@
   register: dashboard_installed
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: false
 
@@ -34,7 +34,7 @@
   when: "'kubernetes-dashboard' in dashboard_installed.stdout"
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: true  # This actually changes state by uninstalling
 
@@ -42,7 +42,7 @@
   ansible.builtin.command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: repo_add_result
   changed_when: "'has been added' in repo_add_result.stdout"
@@ -54,7 +54,7 @@
   ansible.builtin.command: helm repo update
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: true  # Helm repo update always refreshes state
 
@@ -64,7 +64,7 @@
     --namespace kubernetes-dashboard --create-namespace
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: install_result
   changed_when: install_result.rc == 0
@@ -79,7 +79,7 @@
       metadata:
         name: dashboard-admin
         namespace: kubernetes-dashboard
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Create cluster role binding for dashboard admin
@@ -99,7 +99,7 @@
         kind: ClusterRole
         name: cluster-admin
         apiGroup: rbac.authorization.k8s.io
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Create long-lived token for dashboard admin
@@ -115,7 +115,7 @@
         annotations:
           kubernetes.io/service-account.name: dashboard-admin
       type: kubernetes.io/service-account-token
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Wait for token to be generated
@@ -127,7 +127,7 @@
   until: token_check.stdout != ""
   retries: 10
   delay: 5
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: false
 
@@ -139,14 +139,14 @@
   vars:
     dashboard_node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
       | default('192.168.1.100') }}"
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Apply Ingress for Kubernetes Dashboard
   ansible.builtin.command: kubectl apply -f /tmp/dashboard-ingress.yml
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['utility'][0] }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: apply_result
   changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"

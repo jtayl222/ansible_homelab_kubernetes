@@ -17,7 +17,7 @@
           kind: Namespace
           metadata:
             name: "{{ elastic_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Install ECK Custom Resource Definitions
@@ -25,7 +25,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
         src: https://download.elastic.co/downloads/eck/{{ eck_version }}/crds.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Install ECK Operator
@@ -33,7 +33,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
         src: https://download.elastic.co/downloads/eck/{{ eck_version }}/operator.yaml
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Wait for ECK operator to be ready
@@ -43,7 +43,7 @@
       retries: 10
       delay: 15
       until: operator_ready.rc == 0
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
 

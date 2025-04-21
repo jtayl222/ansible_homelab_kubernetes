@@ -108,7 +108,7 @@
             stripPrefix:
               prefixes:
                 - /mlflow
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Create PVC for MLflow artifacts
@@ -343,7 +343,7 @@
             stripPrefix:
               prefixes:
                 - /mlflow
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create headers middleware

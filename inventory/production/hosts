@@ -21,3 +21,9 @@ U850
 
 [nfs_server]
 U850
+
+[nfs_clients]
+NUC8i5BEHS
+NUC10i3FNH
+NUC10i4FNH
+NUC10i7FNH

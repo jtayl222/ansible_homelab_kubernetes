@@ -11,7 +11,7 @@
       ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Fail if kubeconfig doesn't exist
@@ -20,7 +20,7 @@
           Kubeconfig file not found at {{ kubeconfig_path }}. Cannot proceed with
           uninstallation.
       when: not kubeconfig_stat.stat.exists
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Handle potential Helm locks
@@ -30,7 +30,7 @@
             HELM_SECRETS=$(kubectl --kubeconfig="{{ kubeconfig_path }}" \
               get secrets -n {{ prometheus_namespace }} -l owner=helm -o name 2>/dev/null || echo "")
             echo "$HELM_SECRETS"
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           register: helm_secrets
           become: false
           changed_when: false
@@ -67,13 +67,13 @@
                 done
 
               echo "Helm lock cleanup completed"
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
 
         - name: Run Helm lock cleanup script
           ansible.builtin.command:
             cmd: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           register: helm_lock_cleanup
           changed_when: true
@@ -82,7 +82,7 @@
     - name: Check if Prometheus release exists
       ansible.builtin.shell: |
         helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       register: existing_prometheus
       changed_when: false
       failed_when: false
@@ -159,7 +159,7 @@
               delete secret -n {{ prometheus_namespace }} -l app.kubernetes.io/instance={{ prometheus_release_name }} --ignore-not-found=true
             kubectl --kubeconfig="{{ kubeconfig_path }}" \
               delete secret -n {{ prometheus_namespace }} -l owner=helm --ignore-not-found=true
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           register: force_removal
           changed_when: true
@@ -183,14 +183,14 @@
             kubectl --kubeconfig=$KUBECONFIG \
               delete crd ${CRD}.monitoring.coreos.com --ignore-not-found
           done
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: existing_prometheus.stdout | length > 0
 
     - name: Run CRD cleanup script
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: existing_prometheus.stdout | length > 0
       register: crd_removal
@@ -201,7 +201,7 @@
       ansible.builtin.shell: |
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get namespace "{{ prometheus_namespace }}" --no-headers --ignore-not-found
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       register: namespace_check
       changed_when: false
       failed_when: false
@@ -213,7 +213,7 @@
         api_version: v1
         kind: Namespace
         state: absent
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: namespace_check.stdout | length > 0
 
@@ -238,14 +238,14 @@
                 kubectl --kubeconfig=$KUBECONFIG replace --raw "/api/v1/namespaces/$NAMESPACE/finalize" -f -
               echo "Finalizers removed from namespace $NAMESPACE"
           fi
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: namespace_check.stdout | length > 0
 
     - name: Run finalizer removal script
       ansible.builtin.command:
         cmd: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: namespace_check.stdout | length > 0
       register: finalizer_removal
@@ -267,7 +267,7 @@
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get configmap -n {{ prometheus_namespace }} \
           -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "All ConfigMaps removed"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: verification_check
       changed_when: false
@@ -285,7 +285,7 @@
             echo $REMAINING
           args:
             executable: /bin/bash
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           register: remaining_count
           changed_when: false
@@ -326,7 +326,7 @@
             done
           args:
             executable: /bin/bash
-          delegate_to: "{{ groups['utility'][0] }}"
+          delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           register: extreme_cleanup
           changed_when: >-
@@ -349,7 +349,7 @@
         echo "Checking for any remaining prometheus-labeled resources across all namespaces:"
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get all --all-namespaces -l app.kubernetes.io/instance={{ prometheus_release_name }} --no-headers 2>/dev/null || echo "No resources found"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: final_verification
       changed_when: false
@@ -365,7 +365,7 @@
         namespace: "{{ prometheus_namespace }}"
       register: configmap_cleanup
       with_items: "{{ dashboard_configmaps.resources | default([]) }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - configmap_cleanup.failed is defined
@@ -397,7 +397,7 @@
         else
           echo "No lingering Prometheus services found in kube-system"
         fi
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: cleanup_kube_system
       changed_when: cleanup_kube_system.stdout is search("Deleted service")

@@ -22,7 +22,7 @@
             name: kibana
             namespace: "{{ elastic_namespace }}"
       register: kibana_removal
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - kibana_removal.failed is defined
@@ -41,7 +41,7 @@
       until: kibana_deleted.stdout | int > 0 or kibana_deleted.rc != 0
       retries: 10
       delay: 10
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true

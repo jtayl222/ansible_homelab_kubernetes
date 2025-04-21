@@ -20,21 +20,21 @@
       loop:
         - "{{ playbook_dir }}/fetched_tokens"
         - "{{ playbook_dir }}/scripts"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Check if kubeconfig exists
       ansible.builtin.stat:
         path: "{{ kubeconfig_path }}"
       register: kubeconfig_stat
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Fail if kubeconfig doesn't exist
       ansible.builtin.fail:
         msg: Kubeconfig not found. Please run install_090_prometheus_grafana.yml first.
       when: not kubeconfig_stat.stat.exists
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Verify that Prometheus and Grafana are running
@@ -48,7 +48,7 @@
         - "{{ grafana_release_name }}"
         - prometheus-kube-prometheus-operator # This is the operator deployment from kube-prometheus-stack
       register: deployments
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - deployments.resources is defined
@@ -158,7 +158,7 @@
                 },
                 "time": {"from": "now-6h", "to": "now"}
               }
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Apply additional dashboards ConfigMap
@@ -166,7 +166,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
         src: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Create custom alerts
@@ -211,7 +211,7 @@
                 annotations:
                   summary: High disk usage on {{ "{{" }} $labels.instance {{ "}}" }}:{{ "{{" }} $labels.mountpoint {{ "}}" }}
                   description: "Disk usage is above 80% for 5 minutes.\nValue: {{ "{{" }} $value {{ "}}" }}%"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Apply Custom Prometheus Rules
@@ -219,7 +219,7 @@
         kubeconfig: "{{ kubeconfig_path }}"
         state: present
         src: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Get information for access scripts
@@ -228,7 +228,7 @@
         kubectl --kubeconfig="{{ kubeconfig_path }}" \
           get svc traefik -n {{ traefik_namespace }} \
           -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: traefik_nodeport
       changed_when: false
@@ -241,7 +241,7 @@
           -o jsonpath="{.data.admin-password}" | base64 --decode
       args:
         executable: /bin/bash
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       register: grafana_password
       changed_when: false
@@ -294,7 +294,7 @@
           xdg-open "http://$NODE_IP:$TRAEFIK_PORT/grafana" 2>/dev/null || \
           open "http://$NODE_IP:$TRAEFIK_PORT/grafana" 2>/dev/null || \
           echo "Please open http://$NODE_IP:$TRAEFIK_PORT/grafana manually"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Final status message

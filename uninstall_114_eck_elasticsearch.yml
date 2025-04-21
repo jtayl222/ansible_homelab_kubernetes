@@ -22,7 +22,7 @@
             name: elasticsearch
             namespace: "{{ elastic_namespace }}"
       register: es_removal
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       failed_when:
         - es_removal.failed is defined
@@ -44,7 +44,7 @@
       until: elasticsearch_deleted.stdout | int > 0 or elasticsearch_deleted.rc != 0
       retries: 12
       delay: 15
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       failed_when: false  # More specific than ignore_errors
@@ -55,7 +55,7 @@
         kubectl --kubeconfig={{ kubeconfig_path }} \
           get pvc --all-namespaces | grep elasticsearch-data || true
       register: leftover_pvcs
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       changed_when: false
       ignore_errors: true

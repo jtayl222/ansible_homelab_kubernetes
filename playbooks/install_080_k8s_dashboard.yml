@@ -15,7 +15,7 @@
         path: "{{ playbook_dir }}/fetched_tokens"
         state: directory
         mode: "0755"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Ensure scripts directory exists
@@ -23,7 +23,7 @@
         path: "{{ playbook_dir }}/scripts"
         state: directory
         mode: "0755"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Fetch kubeconfig from control plane to utility node
@@ -39,7 +39,7 @@
         content: "{{ kubeconfig_content.stdout }}"
         dest: "{{ local_kubeconfig }}"
         mode: '0600'  # Restricted permissions for security
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Update the kubeconfig to use the control plane IP rather than localhost
@@ -48,7 +48,7 @@
         path: "{{ local_kubeconfig }}"
         regexp: https://127.0.0.1:6443
         replace: https://{{ node_ip }}:6443
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Include the k8s_dashboard role with the proper kubeconfig
@@ -57,7 +57,7 @@
         name: k8s_dashboard
       vars:
         k8s_dashboard_kubeconfig: "{{ local_kubeconfig }}"
-        k8s_dashboard_utility_host: "{{ groups['utility'][0] }}"
+        k8s_dashboard_utility_host: "{{ groups['ansible_controller'][0] }}"
       when: dashboard_enabled
 
       # Create service account and permissions
@@ -71,7 +71,7 @@
           metadata:
             name: "{{ dashboard_service_account }}"
             namespace: "{{ dashboard_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create cluster role binding for dashboard admin
@@ -91,7 +91,7 @@
             kind: ClusterRole
             name: cluster-admin
             apiGroup: rbac.authorization.k8s.io
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Create the token secret
@@ -108,7 +108,7 @@
             annotations:
               kubernetes.io/service-account.name: "{{ dashboard_service_account }}"
           type: kubernetes.io/service-account-token
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Wait for token to be populated
@@ -121,7 +121,7 @@
       retries: 10
       delay: 5
       changed_when: false  # This is just checking status, not changing anything
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Extract token using the local kubeconfig
@@ -134,7 +134,7 @@
         executable: /bin/bash
       register: dashboard_token
       changed_when: false  # This task only reads data, doesn't make changes
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Display dashboard token
@@ -143,7 +143,7 @@
           - Kubernetes Dashboard has been deployed via Helm
           - "You can access the dashboard with this token:"
           - "{{ dashboard_token.stdout }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
 
     - name: Create dashboard access script
       ansible.builtin.copy:
@@ -176,7 +176,7 @@
 
           # Wait for port-forward process to end (when user presses Ctrl+C)
           wait $PF_PID
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Add host-based routing for k8s dashboard
@@ -194,7 +194,7 @@
             headers:
               customRequestHeaders:
                 X-Forwarded-Proto: https
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
     - name: Create Kubernetes Dashboard IngressRoute with host-based routing
@@ -219,5 +219,5 @@
                   - name: kubernetes-dashboard-web
                     port: 8000
                     scheme: http
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false

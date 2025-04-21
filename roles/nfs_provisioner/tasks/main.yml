@@ -1,2 +1,288 @@
-null
-...
+- name: Set control plane host fact
+  ansible.builtin.set_fact:
+    control_plane_host: "{{ groups['k3s_control_plane'][0] }}"
+  when: groups['k3s_control_plane'] is defined and groups['k3s_control_plane']|length > 0
+
+- name: Check if k3s.yaml exists on control plane
+  ansible.builtin.stat:
+    path: /etc/rancher/k3s/k3s.yaml
+  delegate_to: "{{ control_plane_host }}"
+  register: k3s_yaml_stat
+  become: true
+  when: control_plane_host is defined
+
+- name: Debug k3s.yaml status
+  ansible.builtin.debug:
+    msg: "k3s.yaml exists: {{ k3s_yaml_stat.stat.exists if k3s_yaml_stat.stat is defined else 'unknown' }}"
+  when: control_plane_host is defined
+
+- name: Create directory for kubeconfig
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/fetched_tokens"
+    state: directory
+    mode: "0700"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Fetch kubeconfig from control plane node
+  ansible.builtin.fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ kubeconfig_path }}"
+    flat: true
+  become: true
+  delegate_to: "{{ control_plane_host }}"
+  when:
+    - control_plane_host is defined
+    - k3s_yaml_stat.stat is defined
+    - k3s_yaml_stat.stat.exists
+
+- name: Update kubeconfig to use cluster IP
+  ansible.builtin.replace:
+    path: "{{ kubeconfig_path }}"
+    regexp: https://127.0.0.1:6443
+    replace: https://{{ ansible_host }}:6443
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Fix permissions on kubeconfig
+  ansible.builtin.file:
+    path: "{{ kubeconfig_path }}"
+    mode: "0600"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Check if NFS StorageClass already exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" \
+      get sc nfs-client -o name 2>/dev/null || echo "not_found"
+  register: nfs_sc
+  become: false
+  changed_when: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+  # Delete existing StorageClass if parameters need to change
+- name: Delete existing StorageClass if found
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" \
+      delete sc nfs-client
+  when: nfs_sc.stdout != "not_found"
+  become: false
+  register: sc_deleted
+  changed_when: sc_deleted.rc == 0
+
+- name: Create namespace for NFS provisioner
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: nfs-provisioner
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create ServiceAccount for NFS provisioner
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: nfs-provisioner
+        namespace: nfs-provisioner
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create ClusterRole for NFS provisioner
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: nfs-provisioner-runner
+      rules:
+        - apiGroups: [""]
+          resources: [persistentvolumes]
+          verbs: [get, list, watch, create, delete]
+        - apiGroups: [""]
+          resources: [persistentvolumeclaims]
+          verbs: [get, list, watch, update]
+        - apiGroups: [storage.k8s.io]
+          resources: [storageclasses]
+          verbs: [get, list, watch]
+        - apiGroups: [""]
+          resources: [events]
+          verbs: [create, update, patch]
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create ClusterRoleBinding for NFS provisioner
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: nfs-provisioner-runner
+      subjects:
+        - kind: ServiceAccount
+          name: nfs-provisioner
+          namespace: nfs-provisioner
+      roleRef:
+        kind: ClusterRole
+        name: nfs-provisioner-runner
+        apiGroup: rbac.authorization.k8s.io
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create Role for leader election
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: leader-locking-nfs-provisioner
+        namespace: nfs-provisioner
+      rules:
+        - apiGroups: [""]
+          resources: [endpoints]
+          verbs: [get, list, watch, create, update, patch]
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create RoleBinding for leader election
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: RoleBinding
+      metadata:
+        name: leader-locking-nfs-provisioner
+        namespace: nfs-provisioner
+      subjects:
+        - kind: ServiceAccount
+          name: nfs-provisioner
+          namespace: nfs-provisioner
+      roleRef:
+        kind: Role
+        name: leader-locking-nfs-provisioner
+        apiGroup: rbac.authorization.k8s.io
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Deploy NFS provisioner
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: nfs-client-provisioner
+        namespace: nfs-provisioner
+      spec:
+        replicas: 1
+        selector:
+          matchLabels:
+            app: nfs-client-provisioner
+        strategy:
+          type: Recreate
+        template:
+          metadata:
+            labels:
+              app: nfs-client-provisioner
+          spec:
+            serviceAccountName: nfs-provisioner
+            containers:
+              - name: nfs-client-provisioner
+                image: k8s.gcr.io/sig-storage/nfs-subdir-external-provisioner:v4.0.2
+                volumeMounts:
+                  - name: nfs-client-root  # This must match the volume name
+                    mountPath: /persistentvolumes
+                env:
+                  - name: PROVISIONER_NAME
+                    value: cluster.local/nfs-client-provisioner
+                  - name: NFS_SERVER
+                    value: "{{ nfs_server }}"
+                  - name: NFS_PATH
+                    value: "{{ nfs_path }}"
+            volumes:
+              - name: nfs-client-root  # This is the volume name that must match
+                nfs:
+                  server: "{{ nfs_server }}"
+                  path: "{{ nfs_path }}"  # Make sure this has the leading slash
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Create StorageClass for NFS
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: storage.k8s.io/v1
+      kind: StorageClass
+      metadata:
+        name: nfs-client
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"
+      provisioner: cluster.local/nfs-client-provisioner
+      parameters:
+        archiveOnDelete: "false"
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Wait for NFS provisioner deployment to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" -n nfs-provisioner rollout status deployment/nfs-client-provisioner --timeout=120s
+  register: rollout_result
+  failed_when: rollout_result.rc != 0
+  changed_when: false
+  become: false
+
+- name: Create test PVC to verify NFS storage class works
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: nfs-test-claim
+        namespace: nfs-provisioner
+      spec:
+        accessModes:
+          - ReadWriteMany
+        resources:
+          requests:
+            storage: 1Mi
+        storageClassName: nfs-client
+  become: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Wait for PVC to bind
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" -n nfs-provisioner \
+      get pvc nfs-test-claim -o jsonpath='{.status.phase}' 2>/dev/null || echo "Pending"
+  register: pvc_status
+  until: pvc_status.stdout == "Bound"
+  retries: 10
+  delay: 5
+  become: false
+  changed_when: false
+  failed_when: pvc_status.rc != 0 and pvc_status.rc != 1
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Display NFS provisioning status
+  ansible.builtin.debug:
+    msg:
+      - NFS provisioner deployed successfully
+      - "Test PVC status: {{ pvc_status.stdout }}"
+      - NFS default StorageClass created

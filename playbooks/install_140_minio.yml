@@ -59,7 +59,7 @@
           kind: Namespace
           metadata:
             name: "{{ minio_namespace }}"
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: "'not found' in minio_ns_check.stdout"
 
@@ -78,7 +78,7 @@
             stripPrefix:
               prefixes:
                 - /minio
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # 4. Add Bitnami Helm repository
@@ -148,7 +148,7 @@
             selector:
               app.kubernetes.io/name: minio
               app.kubernetes.io/instance: minio
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # 7. Create NodePort service for MinIO Console
@@ -173,7 +173,7 @@
             selector:
               app.kubernetes.io/name: minio
               app.kubernetes.io/instance: minio
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # 8. Create Traefik IngressRoute for MinIO API
@@ -197,7 +197,7 @@
                 services:
                   - name: minio
                     port: 9000
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # 9. Create Traefik IngressRoute for MinIO Console
@@ -221,7 +221,7 @@
                 services:
                   - name: minio
                     port: 9001
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # Update MinIO routing with proper console service and port
@@ -244,7 +244,7 @@
                 services:
                   - name: minio
                     port: 9001
-      delegate_to: "{{ groups['utility'][0] }}"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
       # 10. Wait for MinIO to be ready
