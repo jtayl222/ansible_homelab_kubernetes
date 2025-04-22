@@ -29,12 +29,25 @@
       delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
 
-    - name: Fetch kubeconfig from k3s server
+    - name: Create directory for kubeconfig
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/fetched_tokens"
+        state: directory
+        mode: "0700"
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
+      become: false
+
+    - name: Fetch kubeconfig from control plane node
       ansible.builtin.fetch:
-        src: /etc/rancher/k3s/k3s.yaml
+        src: "{{ k3s_server_path }}"
         dest: "{{ kubeconfig_path }}"
-        flat: yes
-      when: not kubeconfig_stat.stat.exists
+        flat: true
+      become: true
+      delegate_to: "{{ control_plane_host }}"
+      when:
+        - control_plane_host is defined
+        - k3s_yaml_stat.stat is defined
+        - k3s_yaml_stat.stat.exists
 
     - name: Update kubeconfig server address
       ansible.builtin.replace:

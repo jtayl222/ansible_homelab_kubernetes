@@ -6,13 +6,9 @@
   import_playbook: nfs.yml
   tags: [storage, nfs, nfs-server, nfs-clients, nfs-provisioner]
 
-- name: Deploy Traefik
-  import_playbook: install_070_traefik.yml
-  tags: [network, ingress, traefik]
-
-- name: Deploy Kubernetes Dashboard
-  import_playbook: install_080_k8s_dashboard.yml
-  tags: [monitoring, dashboard]
+- name: Deploy Network Infrastructure
+  import_playbook: networking.yml
+  tags: [network, ingress, traefik, dashboard]
 
 - name: Deploy Monitoring Stack
   import_playbook: install_090_prometheus_grafana.yml

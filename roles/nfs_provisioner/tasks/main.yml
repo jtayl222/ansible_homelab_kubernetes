@@ -5,7 +5,7 @@
 
 - name: Check if k3s.yaml exists on control plane
   ansible.builtin.stat:
-    path: /etc/rancher/k3s/k3s.yaml
+    path: "{{ k3s_server_path }}"
   delegate_to: "{{ control_plane_host }}"
   register: k3s_yaml_stat
   become: true
@@ -26,7 +26,7 @@
 
 - name: Fetch kubeconfig from control plane node
   ansible.builtin.fetch:
-    src: /etc/rancher/k3s/k3s.yaml
+    src: "{{ k3s_server_path }}"
     dest: "{{ kubeconfig_path }}"
     flat: true
   become: true

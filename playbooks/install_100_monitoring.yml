@@ -250,7 +250,7 @@
       # Create monitoring access script
     - name: Create monitoring access script
       ansible.builtin.copy:
-        dest: "{{ playbook_dir }}/generated/access_monitoring.sh"
+        dest: "{{ playbook_dir }}/../generated/access_monitoring.sh"
         mode: "0755"
         content: |
           #!/bin/bash

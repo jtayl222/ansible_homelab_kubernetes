@@ -9,7 +9,7 @@
       changed_when: false
       failed_when: false
       environment:
-        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+        KUBECONFIG: "{{ k3s_server_path }}"
 
     - name: Remove Helm releases
       when: kubectl_check.rc == 0
@@ -19,13 +19,13 @@
           register: helm_releases
           changed_when: false
           environment:
-            KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+            KUBECONFIG: "{{ k3s_server_path }}"
           failed_when: false
 
         - name: Remove Grafana Helm release
           ansible.builtin.command: helm uninstall grafana -n monitoring
           environment:
-            KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+            KUBECONFIG: "{{ k3s_server_path }}"
           register: grafana_uninstall
           changed_when: grafana_uninstall.rc == 0
           failed_when: false
@@ -34,7 +34,7 @@
         - name: Remove Prometheus Helm release
           ansible.builtin.command: helm uninstall prometheus -n monitoring
           environment:
-            KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+            KUBECONFIG: "{{ k3s_server_path }}"
           register: prometheus_uninstall
           changed_when: prometheus_uninstall.rc == 0
           failed_when: false

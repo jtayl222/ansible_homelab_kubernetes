@@ -1,0 +1,26 @@
+---
+# Deploy Traefik Ingress Controller
+- name: Deploy Traefik Ingress Controller
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml  # Ensure this is properly referenced
+  pre_tasks:
+    - name: Include kubeconfig tasks
+      ansible.builtin.include_tasks: ../includes/kubeconfig.yml
+  roles:
+    - traefik
+
+# Deploy Kubernetes Dashboard
+- name: Deploy Kubernetes Dashboard
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml
+  pre_tasks:
+    - name: Include kubeconfig tasks
+      ansible.builtin.include_tasks: ../includes/kubeconfig.yml
+  roles:
+    - k8s_dashboard

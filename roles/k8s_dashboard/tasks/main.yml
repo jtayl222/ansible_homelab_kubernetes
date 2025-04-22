@@ -1,152 +1,226 @@
-- name: Download Helm install script
-  ansible.builtin.get_url:
-    url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
-    dest: /tmp/get_helm.sh
-    mode: '0700'
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-
-- name: Install Helm
-  ansible.builtin.command: /tmp/get_helm.sh
-  args:
-    creates: /usr/local/bin/helm
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-
+---
+# 1. Check prerequisites and set variables
 - name: Ensure required variables are defined
   ansible.builtin.set_fact:
-    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address'])
-      }}"
-    kubeconfig: "{{ kubeconfig | default(playbook_dir + '/fetched_tokens/k3s-kubeconfig')
-      }}"
+    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address']) }}"
+    kubeconfig: "{{ kubeconfig_path }}"
 
+# 2. Install Helm on ansible controller if needed
+- name: Install Helm client if needed
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  block:
+    - name: Download Helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0700'
+
+    - name: Install Helm
+      ansible.builtin.command: /tmp/get_helm.sh
+      args:
+        creates: /usr/local/bin/helm
+
+# 3. Manage dashboard installation
 - name: Check if Kubernetes Dashboard is already installed
   ansible.builtin.command: helm list -n kubernetes-dashboard -q
+  environment:
+    KUBECONFIG: '{{ kubeconfig }}'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false
   register: dashboard_installed
+
+- name: Manage Helm repositories
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
-  changed_when: false
+  block:
+    - name: Add Kubernetes Dashboard Helm repository
+      ansible.builtin.command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
+      register: repo_add_result
+      changed_when: "'has been added' in repo_add_result.stdout"
+      failed_when:
+        - repo_add_result.rc != 0
+        - "'already exists' not in repo_add_result.stderr"
 
-- name: Uninstall existing Kubernetes Dashboard (if present)
-  ansible.builtin.command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
-  when: "'kubernetes-dashboard' in dashboard_installed.stdout"
+    - name: Update Helm repositories
+      ansible.builtin.command: helm repo update
+      changed_when: true
+
+- name: Manage dashboard installation
   environment:
     KUBECONFIG: '{{ kubeconfig }}'
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
-  changed_when: true  # This actually changes state by uninstalling
+  block:
+    - name: Uninstall existing Kubernetes Dashboard (if needed)
+      ansible.builtin.command: helm uninstall kubernetes-dashboard -n kubernetes-dashboard
+      when: "'kubernetes-dashboard' in dashboard_installed.stdout"
+      register: uninstall_result
+      changed_when: uninstall_result.rc == 0
 
-- name: Add Kubernetes Dashboard Helm repository
-  ansible.builtin.command: helm repo add k8s-dashboard https://kubernetes.github.io/dashboard/
-  environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    - name: Install Kubernetes Dashboard using Helm
+      ansible.builtin.command: >
+        helm install kubernetes-dashboard k8s-dashboard/kubernetes-dashboard
+        --namespace kubernetes-dashboard --create-namespace
+      register: install_result
+      changed_when: install_result.rc == 0
+
+# 4. Create service account and permissions (combined into one block)
+- name: Setup dashboard authentication
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
-  register: repo_add_result
-  changed_when: "'has been added' in repo_add_result.stdout"
-  failed_when:
-    - repo_add_result.rc != 0
-    - "'already exists' not in repo_add_result.stderr"
+  block:
+    - name: Create dashboard admin service account
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: ServiceAccount
+          metadata:
+            name: "{{ dashboard_service_account | default('dashboard-admin') }}"
+            namespace: "{{ k8s_dashboard_namespace }}"
 
-- name: Update Helm repositories
-  ansible.builtin.command: helm repo update
-  environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    - name: Create cluster role binding for dashboard admin
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: rbac.authorization.k8s.io/v1
+          kind: ClusterRoleBinding
+          metadata:
+            name: "{{ dashboard_service_account | default('dashboard-admin') }}-binding"
+          subjects:
+            - kind: ServiceAccount
+              name: "{{ dashboard_service_account | default('dashboard-admin') }}"
+              namespace: "{{ k8s_dashboard_namespace }}"
+          roleRef:
+            kind: ClusterRole
+            name: cluster-admin
+            apiGroup: rbac.authorization.k8s.io
+
+    - name: Create long-lived token for dashboard admin
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: dashboard-admin-token
+            namespace: "{{ k8s_dashboard_namespace }}"
+            annotations:
+              kubernetes.io/service-account.name: "{{ dashboard_service_account | default('dashboard-admin') }}"
+          type: kubernetes.io/service-account-token
+
+# 5. Setup access (token retrieval)
+- name: Access setup
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
-  changed_when: true  # Helm repo update always refreshes state
+  block:
+    - name: Wait for token to be generated
+      ansible.builtin.command: >
+        kubectl --kubeconfig={{ kubeconfig }} -n {{ k8s_dashboard_namespace }} \
+          get secret dashboard-admin-token -o jsonpath='{.data.token}'
+      register: token_check
+      until: token_check.stdout != ""
+      retries: 10
+      delay: 5
+      changed_when: false
 
-- name: Install Kubernetes Dashboard using Helm
-  ansible.builtin.command: >
-    helm install kubernetes-dashboard k8s-dashboard/kubernetes-dashboard
-    --namespace kubernetes-dashboard --create-namespace
-  environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    - name: Extract dashboard admin token
+      ansible.builtin.shell: |
+        set -o pipefail
+        kubectl --kubeconfig={{ kubeconfig }} -n {{ k8s_dashboard_namespace }} \
+          get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
+      args:
+        executable: /bin/bash
+      register: dashboard_token
+      changed_when: false
+
+    - name: Display dashboard token
+      ansible.builtin.debug:
+        msg:
+          - Kubernetes Dashboard has been deployed via Helm
+          - "You can access the dashboard with this token:"
+          - "{{ dashboard_token.stdout }}"
+
+# 6. Setup access (helper script and routes)
+- name: Create access utilities
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
-  register: install_result
-  changed_when: install_result.rc == 0
+  block:
+    - name: Ensure generated directory exists
+      ansible.builtin.file:
+        path: "{{ playbook_dir }}/../generated"
+        state: directory
+        mode: "0755"
 
-- name: Create dashboard admin service account
-  kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
-    state: present
-    definition:
-      apiVersion: v1
-      kind: ServiceAccount
-      metadata:
-        name: dashboard-admin
-        namespace: kubernetes-dashboard
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
+    - name: Create dashboard access script
+      ansible.builtin.copy:
+        dest: "{{ playbook_dir }}/../generated/access_dashboard.sh"
+        mode: "0755"
+        content: |
+          #!/bin/bash
 
-- name: Create cluster role binding for dashboard admin
-  kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
-    state: present
-    definition:
-      apiVersion: rbac.authorization.k8s.io/v1
-      kind: ClusterRoleBinding
-      metadata:
-        name: dashboard-admin-binding
-      subjects:
-        - kind: ServiceAccount
-          name: dashboard-admin
-          namespace: kubernetes-dashboard
-      roleRef:
-        kind: ClusterRole
-        name: cluster-admin
-        apiGroup: rbac.authorization.k8s.io
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
+          KUBECONFIG="{{ kubeconfig }}"
+          NAMESPACE="{{ k8s_dashboard_namespace }}"
+          TOKEN=$(kubectl --kubeconfig=$KUBECONFIG -n $NAMESPACE \
+            get secret dashboard-admin-token -o jsonpath="{.data.token}" | base64 -d)
 
-- name: Create long-lived token for dashboard admin
-  kubernetes.core.k8s:
-    kubeconfig: '{{ kubeconfig }}'
-    state: present
-    definition:
-      apiVersion: v1
-      kind: Secret
-      metadata:
-        name: dashboard-admin-token
-        namespace: kubernetes-dashboard
-        annotations:
-          kubernetes.io/service-account.name: dashboard-admin
-      type: kubernetes.io/service-account-token
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
+          echo "Starting Kubernetes Dashboard using port-forwarding..."
+          echo "Token is:"
+          echo "$TOKEN"
+          echo
+          echo "Starting port-forward - press Ctrl+C to exit when done"
 
-- name: Wait for token to be generated
-  ansible.builtin.command: >
-    kubectl --kubeconfig={{ kubeconfig }} -n kubernetes-dashboard
-      get secret dashboard-admin-token
-      -o jsonpath='{.data.token}'
-  register: token_check
-  until: token_check.stdout != ""
-  retries: 10
-  delay: 5
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-  changed_when: false
+          kubectl --kubeconfig=$KUBECONFIG -n $NAMESPACE port-forward svc/kubernetes-dashboard 8443:443 &
+          PF_PID=$!
 
-- name: Create Ingress manifest for Kubernetes Dashboard
-  ansible.builtin.template:
-    src: dashboard-ingress.yml.j2
-    dest: /tmp/dashboard-ingress.yml
-    mode: '0600'  # Restricted permissions since it might contain sensitive info
-  vars:
-    dashboard_node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
-      | default('192.168.1.100') }}"
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
+          sleep 3
 
-- name: Apply Ingress for Kubernetes Dashboard
-  ansible.builtin.command: kubectl apply -f /tmp/dashboard-ingress.yml
-  environment:
-    KUBECONFIG: '{{ kubeconfig }}'
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-  register: apply_result
-  changed_when: "'created' in apply_result.stdout or 'configured' in apply_result.stdout"
+          echo "Opening browser to https://localhost:8443/"
+          xdg-open https://localhost:8443/ 2>/dev/null || open https://localhost:8443/ 2>/dev/null || echo "Please open https://localhost:8443/ in your browser"
+
+          wait $PF_PID
+
+    - name: Create routing middleware
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: Middleware
+          metadata:
+            name: dashboard-headers
+            namespace: "{{ k8s_dashboard_namespace }}"
+          spec:
+            headers:
+              customRequestHeaders:
+                X-Forwarded-Proto: https
+
+    - name: Create dashboard IngressRoute
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig }}"
+        state: present
+        definition:
+          apiVersion: traefik.io/v1alpha1
+          kind: IngressRoute
+          metadata:
+            name: kubernetes-dashboard-route
+            namespace: "{{ k8s_dashboard_namespace }}"
+          spec:
+            entryPoints:
+              - web
+            routes:
+              - match: Host(`{{ k8s_dashboard_ingress_host }}`) || Host(`dashboard.{{ node_ip }}.nip.io`)
+                kind: Rule
+                middlewares:
+                  - name: dashboard-headers
+                services:
+                  - name: kubernetes-dashboard
+                    port: 443
+                    scheme: https
