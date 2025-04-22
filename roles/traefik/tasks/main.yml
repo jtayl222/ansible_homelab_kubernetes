@@ -9,27 +9,12 @@
     msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
   when: not traefik_kubeconfig_check.stat.exists
 
-- name: Create directory for fetched tokens
-  ansible.builtin.file:
-    path: "{{ playbook_dir }}/fetched_tokens"
-    state: directory
-    mode: "0755"
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-
 - name: Create scripts directory
   ansible.builtin.file:
-    path: "{{ playbook_dir }}/scripts"
+    path: "{{ playbook_dir }}/../scripts"
     state: directory
     mode: "0755"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
-
-- name: Create directory for kubeconfig
-  ansible.builtin.file:
-    path: "{{ playbook_dir }}/fetched_tokens"
-    state: directory
-    mode: "0700"
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
 
 - name: Get Traefik nodePort
   ansible.builtin.shell: |

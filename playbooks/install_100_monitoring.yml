@@ -2,34 +2,10 @@
   hosts: k3s_control_plane
   become: true
   gather_facts: true
-  vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
-    prometheus_namespace: monitoring
-    prometheus_release_name: prometheus
-    grafana_release_name: prometheus-grafana # This is the default name from kube-prometheus-stack
-    node_ip: "{{ ansible_default_ipv4.address }}"
-    traefik_namespace: kube-system
+  vars_files:
+    - ../group_vars/all/common.yml
 
   tasks:
-    # Verify prerequisites
-    - name: Ensure directories exist
-      ansible.builtin.file:
-        path: "{{ item }}"
-        state: directory
-        mode: "0755"
-      loop:
-        - "{{ playbook_dir }}/fetched_tokens"
-        - "{{ playbook_dir }}/scripts"
-      delegate_to: "{{ groups['ansible_controller'][0] }}"
-      become: false
-
-    - name: Check if kubeconfig exists
-      ansible.builtin.stat:
-        path: "{{ kubeconfig_path }}"
-      register: kubeconfig_stat
-      delegate_to: "{{ groups['ansible_controller'][0] }}"
-      become: false
-
     - name: Fail if kubeconfig doesn't exist
       ansible.builtin.fail:
         msg: Kubeconfig not found. Please run install_090_prometheus_grafana.yml first.
@@ -256,7 +232,7 @@
           #!/bin/bash
 
           KUBECONFIG="{{ kubeconfig_path }}"
-          NODE_IP="{{ node_ip }}"
+          NODE_IP="{{ control_plane_ip }}"
           TRAEFIK_PORT="{{ traefik_nodeport.stdout }}"
           GRAFANA_PASSWORD="{{ grafana_password.stdout }}"
 
@@ -309,7 +285,7 @@
           - "Access all monitoring components using the script:"
           - ./generated/access_monitoring.sh
           - ""
-          - "Grafana URL: http://{{ node_ip }}:{{ traefik_nodeport.stdout }}/grafana"
+          - "Grafana URL: http://{{ control_plane_ip }}:{{ traefik_nodeport.stdout }}/grafana"
           - "Grafana username: admin"
           - "Grafana password: {{ grafana_password.stdout }}"
           - ""

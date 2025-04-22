@@ -1,2 +1,165 @@
-null
-...
+---
+# 1. Verify prerequisites
+- name: Verify kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: minio_kubeconfig_check
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not minio_kubeconfig_check.stat.exists
+
+# 2. Install Helm if needed
+- name: Install Helm client if needed
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  block:
+    - name: Download Helm install script
+      ansible.builtin.get_url:
+        url: https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+        dest: /tmp/get_helm.sh
+        mode: '0700'
+
+    - name: Install Helm
+      ansible.builtin.command: /tmp/get_helm.sh
+      args:
+        creates: /usr/local/bin/helm
+
+# 3. Helm repository management
+- name: Manage Helm repositories
+  environment:
+    KUBECONFIG: '{{ kubeconfig_path }}'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  block:
+    - name: Add MinIO Helm repository
+      ansible.builtin.command: helm repo add minio {{ minio_chart_repository }}
+      register: repo_add_result
+      changed_when: "'has been added' in repo_add_result.stdout"
+      failed_when:
+        - repo_add_result.rc != 0
+        - "'already exists' not in repo_add_result.stderr"
+
+    - name: Update Helm repositories
+      ansible.builtin.command: helm repo update
+      changed_when: true
+
+# 4. Check existing installation
+- name: Check if MinIO is already installed
+  ansible.builtin.command: helm list -n {{ minio_namespace }} --short
+  environment:
+    KUBECONFIG: '{{ kubeconfig_path }}'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false
+  register: minio_installed
+
+# 5. Create namespace if needed
+- name: Create MinIO namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ minio_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# 6. Create values file for MinIO
+- name: Create temporary values file for MinIO
+  ansible.builtin.template:
+    src: minio-values.yaml.j2
+    dest: /tmp/minio-values.yaml
+    mode: '0600'  # Restrictive permissions for security
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: minio_values
+
+# 7. Install or upgrade MinIO
+- name: Install or upgrade MinIO using Helm
+  ansible.builtin.command: >
+    helm upgrade --install {{ minio_release_name }} minio/minio
+    --namespace {{ minio_namespace }}
+    --values /tmp/minio-values.yaml
+    {% if minio_chart_version != 'latest' %}--version {{ minio_chart_version }}{% endif %}
+  environment:
+    KUBECONFIG: '{{ kubeconfig_path }}'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: minio_helm_result
+  changed_when: "'STATUS: deployed' in minio_helm_result.stdout"
+
+# 8. Create IngressRoute if Traefik is used
+- name: Set up Traefik IngressRoute for MinIO
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio
+        namespace: "{{ minio_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: Host(`{{ minio_ingress_host }}`)
+            kind: Rule
+            services:
+              - name: "{{ minio_release_name }}"
+                port: 9000
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: minio_ingress_enabled
+
+# 9. Create IngressRoute for MinIO Console
+- name: Set up Traefik IngressRoute for MinIO Console
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio-console
+        namespace: "{{ minio_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: Host(`{{ minio_console_ingress_host }}`)
+            kind: Rule
+            services:
+              - name: "{{ minio_release_name }}-console"
+                port: 9001
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: minio_ingress_enabled
+
+# 10. Display access information
+- name: Get MinIO service details
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} get svc {{ minio_release_name }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+  args:
+    executable: /bin/bash
+  register: minio_service_ip
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false
+  when: minio_service_type == 'LoadBalancer'
+
+- name: Display MinIO access information
+  ansible.builtin.debug:
+    msg:
+      - "MinIO has been deployed successfully"
+      - "API Access: http://{{ minio_ingress_host }}"
+      - "Console Access: http://{{ minio_console_ingress_host }}"
+      - "Username: {{ minio_root_user }}"
+      - "Password: {{ minio_root_password }}"
+      - "Note: Please consider changing the default credentials."

@@ -16,14 +16,6 @@
     msg: "k3s.yaml exists: {{ k3s_yaml_stat.stat.exists if k3s_yaml_stat.stat is defined else 'unknown' }}"
   when: control_plane_host is defined
 
-- name: Create directory for kubeconfig
-  ansible.builtin.file:
-    path: "{{ playbook_dir }}/fetched_tokens"
-    state: directory
-    mode: "0700"
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-
 - name: Fetch kubeconfig from control plane node
   ansible.builtin.fetch:
     src: "{{ k3s_server_path }}"

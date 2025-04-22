@@ -1,0 +1,10 @@
+- name: Install Prometheus and Grafana Stack
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all/common.yml
+  vars:
+    prometheus_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd"
+  roles:
+    - prometheus_grafana

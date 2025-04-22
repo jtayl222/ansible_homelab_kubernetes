@@ -6,9 +6,6 @@
   gather_facts: false
   vars_files:
     - ../group_vars/all/common.yml  # Ensure this is properly referenced
-  pre_tasks:
-    - name: Include kubeconfig tasks
-      ansible.builtin.include_tasks: ../includes/kubeconfig.yml
   roles:
     - traefik
 
@@ -19,8 +16,5 @@
   gather_facts: false
   vars_files:
     - ../group_vars/all/common.yml
-  pre_tasks:
-    - name: Include kubeconfig tasks
-      ansible.builtin.include_tasks: ../includes/kubeconfig.yml
   roles:
     - k8s_dashboard

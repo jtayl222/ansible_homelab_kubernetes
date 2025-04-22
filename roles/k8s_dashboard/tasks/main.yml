@@ -1,10 +1,4 @@
 ---
-# 1. Check prerequisites and set variables
-- name: Ensure required variables are defined
-  ansible.builtin.set_fact:
-    node_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] | default(hostvars[inventory_hostname]['ansible_default_ipv4']['address']) }}"
-    kubeconfig: "{{ kubeconfig_path }}"
-
 # 2. Install Helm on ansible controller if needed
 - name: Install Helm client if needed
   delegate_to: "{{ groups['ansible_controller'][0] }}"
@@ -216,7 +210,7 @@
             entryPoints:
               - web
             routes:
-              - match: Host(`{{ k8s_dashboard_ingress_host }}`) || Host(`dashboard.{{ node_ip }}.nip.io`)
+              - match: Host(`{{ k8s_dashboard_ingress_host }}`) || Host(`dashboard.{{ control_plane_ip }}.nip.io`)
                 kind: Rule
                 middlewares:
                   - name: dashboard-headers

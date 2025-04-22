@@ -6,12 +6,16 @@
   import_playbook: nfs.yml
   tags: [storage, nfs, nfs-server, nfs-clients, nfs-provisioner]
 
+- name: Configure Storage Infrastructure
+  import_playbook: storage.yml
+  tags: [storage, minio]
+
 - name: Deploy Network Infrastructure
   import_playbook: networking.yml
   tags: [network, ingress, traefik, dashboard]
 
 - name: Deploy Monitoring Stack
-  import_playbook: install_090_prometheus_grafana.yml
+  import_playbook: prometheus_grafana.yml
   tags: [monitoring, prometheus, grafana]
 
 - name: Grafana dashboards
@@ -29,10 +33,6 @@
 - name: Deploy Argo Workflows
   import_playbook: install_130_argo_workflows.yml
   tags: [workflow, argowf]
-
-- name: Deploy minio
-  import_playbook: install_140_minio.yml
-  tags: [storage, minio]
 
 - name: Deploy Seldon
   import_playbook: install_150_seldon.yml

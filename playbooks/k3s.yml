@@ -5,8 +5,18 @@
   roles:
     - k3s_control_plane
 
+- name: Fetch kubeconfig to localhost
+  hosts: localhost
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml
+  roles:
+    - fetch_kubeconfig
+
 - name: Deploy K3s Worker Nodes
   hosts: k3s_workers
   become: true
+  vars_files:
+    - ../group_vars/all/common.yml
   roles:
     - k3s_workers

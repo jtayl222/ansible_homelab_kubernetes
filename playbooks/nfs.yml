@@ -18,6 +18,3 @@
   connection: local
   vars_files:
     - ../group_vars/all/common.yml
-  pre_tasks:
-    - name: Include kubeconfig tasks
-      ansible.builtin.include_tasks: ../includes/kubeconfig.yml

@@ -1,2 +1,21 @@
-null
-...
+---
+# MinIO deployment configuration
+minio_namespace: minio
+minio_storage_class: nfs-client
+minio_storage_size: 10Gi
+minio_replica_count: 1
+
+# Default credentials (should be overridden in vault)
+minio_root_user: minioadmin
+minio_root_password: minioadmin
+
+# Service configuration
+minio_service_type: ClusterIP
+minio_ingress_enabled: true
+minio_ingress_host: minio.local
+minio_console_ingress_host: console.minio.local
+
+# Helm chart configuration
+minio_chart_version: latest  # Use specific version in production
+minio_release_name: minio
+minio_chart_repository: https://charts.min.io/
