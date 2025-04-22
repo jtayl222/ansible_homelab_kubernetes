@@ -1,0 +1,6 @@
+---
+- name: Test metrics_server role
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - metrics_server

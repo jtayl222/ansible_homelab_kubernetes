@@ -1,0 +1,5 @@
+- name: Test kube-state-metrics role
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - kube_state_metrics

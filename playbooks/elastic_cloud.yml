@@ -1,0 +1,12 @@
+- name: Install ECK Operator
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all/common.yml
+
+  roles:
+    - eck_operator
+    - elasticsearch
+    - kibana

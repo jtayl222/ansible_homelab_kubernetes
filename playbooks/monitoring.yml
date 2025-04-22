@@ -1,10 +1,18 @@
-- name: Install Prometheus and Grafana Stack
-  hosts: k3s_control_plane
-  become: true
-  gather_facts: true
+---
+- name: Install Monitoring Stack
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
   vars_files:
     - ../group_vars/all/common.yml
+
   vars:
     prometheus_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd"
+
   roles:
-    - prometheus_grafana
+    - prometheus
+    - grafana
+    - metrics_server
+    - kube_state_metrics
+    - node_exporter

@@ -1,6 +1,0 @@
----
-- name: Test prometheus_grafana role
-  hosts: ansible_controller
-  remote_user: user
-  roles:
-    - prometheus_grafana

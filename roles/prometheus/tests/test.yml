@@ -1,0 +1,6 @@
+---
+- name: Test prometheus role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - prometheus

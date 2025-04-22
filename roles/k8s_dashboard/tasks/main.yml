@@ -19,7 +19,7 @@
 - name: Check if Kubernetes Dashboard is already installed
   ansible.builtin.command: helm list -n kubernetes-dashboard -q
   environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    KUBECONFIG: '{{ kubeconfig_path }}'
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: false
@@ -27,7 +27,7 @@
 
 - name: Manage Helm repositories
   environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    KUBECONFIG: '{{ kubeconfig_path }}'
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   block:
@@ -45,7 +45,7 @@
 
 - name: Manage dashboard installation
   environment:
-    KUBECONFIG: '{{ kubeconfig }}'
+    KUBECONFIG: '{{ kubeconfig_path }}'
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   block:
@@ -69,7 +69,7 @@
   block:
     - name: Create dashboard admin service account
       kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig }}"
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
@@ -80,7 +80,7 @@
 
     - name: Create cluster role binding for dashboard admin
       kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig }}"
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: rbac.authorization.k8s.io/v1
@@ -98,7 +98,7 @@
 
     - name: Create long-lived token for dashboard admin
       kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig }}"
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: v1
@@ -117,7 +117,7 @@
   block:
     - name: Wait for token to be generated
       ansible.builtin.command: >
-        kubectl --kubeconfig={{ kubeconfig }} -n {{ k8s_dashboard_namespace }} \
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ k8s_dashboard_namespace }} \
           get secret dashboard-admin-token -o jsonpath='{.data.token}'
       register: token_check
       until: token_check.stdout != ""
@@ -128,7 +128,7 @@
     - name: Extract dashboard admin token
       ansible.builtin.shell: |
         set -o pipefail
-        kubectl --kubeconfig={{ kubeconfig }} -n {{ k8s_dashboard_namespace }} \
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ k8s_dashboard_namespace }} \
           get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
       args:
         executable: /bin/bash
@@ -160,7 +160,7 @@
         content: |
           #!/bin/bash
 
-          KUBECONFIG="{{ kubeconfig }}"
+          KUBECONFIG="{{ kubeconfig_path }}"
           NAMESPACE="{{ k8s_dashboard_namespace }}"
           TOKEN=$(kubectl --kubeconfig=$KUBECONFIG -n $NAMESPACE \
             get secret dashboard-admin-token -o jsonpath="{.data.token}" | base64 -d)
@@ -183,7 +183,7 @@
 
     - name: Create routing middleware
       kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig }}"
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1
@@ -198,7 +198,7 @@
 
     - name: Create dashboard IngressRoute
       kubernetes.core.k8s:
-        kubeconfig: "{{ kubeconfig }}"
+        kubeconfig: "{{ kubeconfig_path }}"
         state: present
         definition:
           apiVersion: traefik.io/v1alpha1

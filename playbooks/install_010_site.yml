@@ -15,19 +15,15 @@
   tags: [network, ingress, traefik, dashboard]
 
 - name: Deploy Monitoring Stack
-  import_playbook: prometheus_grafana.yml
+  import_playbook: monitoring.yml
   tags: [monitoring, prometheus, grafana]
 
-- name: Grafana dashboards
-  import_playbook: install_100_monitoring.yml
-  tags: [monitoring, extras]
-
 - name: Elastic Stack
-  import_playbook: install_110_eck.yml
+  import_playbook: elastic_cloud.yml
   tags: [elastic, eck]
 
 - name: Deploy MLflow
-  import_playbook: install_120_mlflow.yml
+  import_playbook: mlflow.yml
   tags: [ml, mlflow]
 
 - name: Deploy Argo Workflows
