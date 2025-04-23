@@ -1,9 +1,13 @@
----
-- name: Deploy K3s Control Plane
+# Setup K3s Cluster
+- name: Configure K3s Control Plane
   hosts: k3s_control_plane
   become: true
+  gather_facts: true
+  vars_files:
+    - ../group_vars/all/common.yml
   roles:
-    - k3s_control_plane
+    - role: k3s_control_plane
+      tags: [k3s, control_plane]
 
 - name: Fetch kubeconfig to localhost
   hosts: localhost
@@ -11,12 +15,15 @@
   vars_files:
     - ../group_vars/all/common.yml
   roles:
-    - fetch_kubeconfig
+    - role: fetch_kubeconfig
+      tags: [k3s, kubeconfig]
 
-- name: Deploy K3s Worker Nodes
+- name: Configure K3s Worker Nodes
   hosts: k3s_workers
   become: true
+  gather_facts: true
   vars_files:
     - ../group_vars/all/common.yml
   roles:
-    - k3s_workers
+    - role: k3s_workers
+      tags: [k3s, workers]

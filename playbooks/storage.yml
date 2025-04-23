@@ -1,29 +1,28 @@
 ---
 # Storage infrastructure playbook - combines NFS and Object Storage solutions
 
-# First, prepare Kubernetes access
-- name: Prepare Kubernetes access
-  hosts: localhost
-  gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
+- name: Configure NFS Server
+  hosts: nfs_server
+  gather_facts: true
+  become: true
+  roles:
+    - role: nfs_server
+      tags: [storage, nfs, nfs-server]
 
-# Deploy NFS storage provisioner
-- name: Deploy NFS Storage
+- name: Configure NFS Clients
+  hosts: k3s_control_plane:k3s_workers
+  gather_facts: true
+  become: true
+  roles:
+    - role: nfs_clients
+      tags: [storage, nfs, nfs-clients]
+
+- name: Setup Kubernetes Storage Components
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
-    - nfs_provisioner
-
-# Deploy MinIO Object Storage
-- name: Deploy MinIO Object Storage
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
-  roles:
-    - minio
+    - role: nfs_provisioner
+      tags: [storage, nfs, nfs-provisioner]
+    - role: minio
+      tags: [storage, minio]

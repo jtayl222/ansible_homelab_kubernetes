@@ -7,8 +7,6 @@
   hosts: k3s_control_plane
   become: true
   gather_facts: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: k3s_control_plane
       tags: [k3s, control_plane]
@@ -16,8 +14,6 @@
 - name: Fetch kubeconfig to localhost
   hosts: localhost
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: fetch_kubeconfig
       tags: [k3s, kubeconfig]
@@ -26,8 +22,6 @@
   hosts: k3s_workers
   become: true
   gather_facts: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: k3s_workers
       tags: [k3s, workers]
@@ -37,8 +31,6 @@
   hosts: nfs_server
   gather_facts: true
   become: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: nfs_server
       tags: [storage, nfs, nfs-server]
@@ -47,8 +39,6 @@
   hosts: k3s_control_plane:k3s_workers
   gather_facts: true
   become: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: nfs_clients
       tags: [storage, nfs, nfs-clients]
@@ -57,8 +47,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: nfs_provisioner
       tags: [storage, nfs, nfs-provisioner]
@@ -70,13 +58,18 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: traefik
       tags: [network, ingress, traefik]
     - role: k8s_dashboard
       tags: [network, dashboard]
+
+# Sealed Secrets
+- name: Install Sealed Secrets controller
+  hosts: k3s_control_plane
+  become: true
+  roles:
+    - role: sealed_secrets
 
 # Step 4: Monitoring Stack
 - name: Setup Monitoring Infrastructure
@@ -85,8 +78,6 @@
   gather_facts: false
   vars:
     prometheus_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd"
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     # - role: prometheus_operator  # <-- Add this role if you have it
     #   tags: [monitoring, prometheus]
@@ -105,8 +96,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: elastic_operator
       tags: [elastic, eck, operator]
@@ -122,8 +111,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: mlflow
       tags: [ml, mlflow]
@@ -137,8 +124,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: argo_cd
       tags: [mlops, argo_cd]
@@ -146,6 +131,12 @@
       tags: [mlops, workflow, argowf]
     - role: mlops_demo_app
       tags: [mlops, demo]
+
+- name: Deploy MLOps demo application
+  hosts: k3s_control_plane
+  become: true
+  roles:
+    - mlops_demo_app
 
 # Final Step: Display completion banner
 - name: Display deployment complete banner

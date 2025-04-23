@@ -1,3 +1,17 @@
+- name: Debug NFS variables
+  ansible.builtin.debug:
+    msg:
+      - "nfs_server: {{ nfs_server | default('undefined') }}"
+      - "nfs_path: {{ nfs_path | default('undefined') }}"
+      - "nfs_server group first host: {{ groups['nfs_server'][0] | default('no nfs_server group') }}"
+      - "nfs_server host IP: {{
+          hostvars[groups['nfs_server'][0]]['ansible_host'] | default('undefined')
+          if groups['nfs_server'] is defined and groups['nfs_server'] | length > 0
+          else 'no nfs_server hosts'
+        }}"
+      - "inventory_hostname: {{ inventory_hostname }}"
+  become: false
+
 - name: Install NFS client packages
   ansible.builtin.apt:
     name:

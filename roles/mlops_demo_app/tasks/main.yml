@@ -24,6 +24,31 @@
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
+- name: Debug controller service status
+  ansible.builtin.command: kubectl --kubeconfig="{{ kubeconfig_path }}" get svc -n {{ sealed_secrets_namespace }} sealed-secrets-controller
+  register: service_status
+  changed_when: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Wait for SealedSecret CRD to be available
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" get crd sealedsecrets.bitnami.com
+  register: crd_check
+  until: crd_check.rc == 0
+  retries: 30
+  delay: 10
+  changed_when: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Apply Sealed Secrets (MinIO + Workflow)
+  ansible.builtin.command: kubectl --kubeconfig="{{ kubeconfig_path }}" apply -f "{{ playbook_dir }}/../manifests/sealed-secrets/mlops-secrets.yaml"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: "'configured' in result.stdout or 'created' in result.stdout"
+  register: result
+
 # Apply RBAC configurations
 - name: Apply RBAC configurations
   kubernetes.core.k8s:

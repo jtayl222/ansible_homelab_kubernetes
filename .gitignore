@@ -83,6 +83,7 @@ kubeconfig
 **/*credential*
 !.pre-commit-config.yaml
 !roles/fetch_kubeconfig
+!playbooks/sealed_secrets.yml
 
 # Other files that should not be tracked
 */OLD/**

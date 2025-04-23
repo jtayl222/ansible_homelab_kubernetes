@@ -1,0 +1,10 @@
+---
+- name: Deploy MLOps Demo Application
+  hosts: k3s_control_plane
+  become: true
+
+  vars_files:
+    - ../group_vars/all/common.yml
+
+  roles:
+    - role: mlops_demo_app

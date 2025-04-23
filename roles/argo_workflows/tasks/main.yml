@@ -640,7 +640,7 @@
 # 16. Create token generation script
 - name: Create a local script to generate a valid token for Argo Workflows UI
   ansible.builtin.copy:
-    dest: "{{ playbook_dir }}/generated/get-argowf-token.sh"
+    dest: "{{ playbook_dir }}/../generated/get-argowf-token.sh"
     mode: "0755"
     content: |
       #!/bin/bash
