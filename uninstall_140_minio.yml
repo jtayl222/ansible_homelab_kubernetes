@@ -3,7 +3,7 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     minio_namespace: minio
     minio_chart_repo: bitnami
     minio_chart_name: minio

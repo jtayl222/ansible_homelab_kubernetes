@@ -1,0 +1,10 @@
+- name: Install Seldon on K3s
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all/common.yml
+
+  roles:
+    - seldon

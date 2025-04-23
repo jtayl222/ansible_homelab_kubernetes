@@ -1,0 +1,290 @@
+---
+# Filebeat deployment tasks
+
+# Verify prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Verify Elasticsearch is deployed
+- name: Check if Elasticsearch is deployed
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: elasticsearch.k8s.elastic.co/v1
+    kind: Elasticsearch
+    namespace: "{{ filebeat_namespace }}"
+    name: "elasticsearch"
+  register: elasticsearch_check
+  failed_when: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Warn if Elasticsearch is not found
+  ansible.builtin.debug:
+    msg: "WARNING: Elasticsearch not found in {{ filebeat_namespace }} namespace.
+      Filebeat will be deployed but may not function until Elasticsearch is available."
+  when: elasticsearch_check.resources | default([]) | length == 0
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Ensure namespace exists
+- name: Ensure Elastic namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ filebeat_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create service account
+- name: Create Filebeat service account
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ filebeat_service_account }}"
+        namespace: "{{ filebeat_namespace }}"
+        labels:
+          app: "filebeat"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create ClusterRole
+- name: Create Filebeat ClusterRole
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: filebeat
+        labels:
+          app: "filebeat"
+      rules:
+        - apiGroups: [""]
+          resources:
+            - namespaces
+            - pods
+            - nodes
+          verbs:
+            - get
+            - watch
+            - list
+        - apiGroups: ["apps"]
+          resources:
+            - replicasets
+            - deployments
+            - statefulsets
+            - daemonsets
+          verbs: ["get", "list", "watch"]
+        - apiGroups: ["batch"]
+          resources:
+            - jobs
+            - cronjobs
+          verbs: ["get", "list", "watch"]
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create ClusterRoleBinding
+- name: Create Filebeat ClusterRoleBinding
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: filebeat
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ filebeat_service_account }}"
+          namespace: "{{ filebeat_namespace }}"
+      roleRef:
+        kind: ClusterRole
+        name: filebeat
+        apiGroup: rbac.authorization.k8s.io
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create ConfigMap with Filebeat configuration
+- name: Create Filebeat ConfigMap
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: filebeat-config
+        namespace: "{{ filebeat_namespace }}"
+        labels:
+          app: "filebeat"
+      data:
+        filebeat.yml: "{{ lookup('template', 'filebeat.yml.j2') }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Get Elasticsearch credentials
+- name: Get Elasticsearch password from Secret
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: Secret
+    namespace: "{{ filebeat_namespace }}"
+    name: elasticsearch-es-elastic-user
+  register: elastic_secret
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  failed_when: false
+
+- name: Set Elasticsearch password
+  ansible.builtin.set_fact: >-
+    elastic_password: "{{ elastic_secret.resources[0].data.elastic | b64decode
+      if elastic_secret.resources is defined and elastic_secret.resources | length > 0 else '' }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: elastic_secret.resources is defined and elastic_secret.resources | length > 0
+
+# Create Filebeat DaemonSet
+- name: Deploy Filebeat DaemonSet
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: DaemonSet
+      metadata:
+        name: "{{ filebeat_daemonset_name }}"
+        namespace: "{{ filebeat_namespace }}"
+        labels:
+          app: "filebeat"
+      spec:
+        selector:
+          matchLabels:
+            app: "filebeat"
+        template:
+          metadata:
+            labels:
+              app: "filebeat"
+          spec:
+            serviceAccountName: "{{ filebeat_service_account }}"
+            terminationGracePeriodSeconds: 30
+            hostNetwork: true
+            dnsPolicy: ClusterFirstWithHostNet
+            containers:
+              - name: filebeat
+                image: "docker.elastic.co/beats/filebeat:{{ filebeat_version }}"
+                args: [
+                  "-c", "/etc/filebeat.yml",
+                  "-e",
+                ]
+                env:
+                  - name: ELASTICSEARCH_HOST
+                    value: "{{ filebeat_elasticsearch_host }}"
+                  - name: ELASTICSEARCH_USERNAME
+                    value: "{{ filebeat_elasticsearch_username }}"
+                  - name: ELASTICSEARCH_PASSWORD
+                    valueFrom:
+                      secretKeyRef:
+                        name: elasticsearch-es-elastic-user
+                        key: elastic
+                  - name: NODE_NAME
+                    valueFrom:
+                      fieldRef:
+                        fieldPath: spec.nodeName
+                securityContext:
+                  runAsUser: 0
+                resources:
+                  limits:
+                    memory: "{{ filebeat_resources.limits.memory }}"
+                    cpu: "{{ filebeat_resources.limits.cpu }}"
+                  requests:
+                    cpu: "{{ filebeat_resources.requests.cpu }}"
+                    memory: "{{ filebeat_resources.requests.memory }}"
+                volumeMounts:
+                  - name: config
+                    mountPath: /etc/filebeat.yml
+                    readOnly: true
+                    subPath: filebeat.yml
+                  - name: data
+                    mountPath: /usr/share/filebeat/data
+                  - name: varlibdockercontainers
+                    mountPath: /var/lib/docker/containers
+                    readOnly: true
+                  - name: varlog
+                    mountPath: /var/log
+                    readOnly: true
+            volumes:
+              - name: config
+                configMap:
+                  defaultMode: 0640
+                  name: filebeat-config
+              - name: varlibdockercontainers
+                hostPath:
+                  path: /var/lib/docker/containers
+              - name: varlog
+                hostPath:
+                  path: /var/log
+              - name: data
+                hostPath:
+                  path: /var/lib/filebeat-data
+                  type: DirectoryOrCreate
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Wait for rollout
+- name: Wait for Filebeat DaemonSet rollout
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: DaemonSet
+    namespace: "{{ filebeat_namespace }}"
+    name: "{{ filebeat_daemonset_name }}"
+  register: filebeat_ds
+  # Split into more lines with clearer variable assignments
+  until: >-
+    ds_status.desiredNumberScheduled is defined and
+    ds_status.numberReady is defined and
+    ds_status.desiredNumberScheduled == ds_status.numberReady
+  vars:
+    ds_status: "{{ filebeat_ds.resources[0].status }}"
+  retries: 10
+  delay: 15
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  failed_when: false
+
+# Display completion message
+- name: Display Filebeat installation summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================"
+      - "Filebeat has been deployed successfully"
+      - "Namespace: {{ filebeat_namespace }}"
+      - "Shipping logs to: {{ filebeat_elasticsearch_host }}"
+      - "Log collection:"
+      - "  - Container logs: {{ 'Enabled' if filebeat_collect_container_logs else 'Disabled' }}"
+      - "  - Kubernetes metadata: {{ 'Enabled' if filebeat_collect_k8s_metadata else 'Disabled' }}"
+      - "  - System logs: {{ 'Enabled' if filebeat_collect_system_logs else 'Disabled' }}"
+      - "  - Node logs: {{ 'Enabled' if filebeat_collect_node_logs else 'Disabled' }}"
+      - "============================================"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false

@@ -5,6 +5,21 @@
   delegate_to: "{{ groups['ansible_controller'][0] }}"  # Add this line to check on U850 instead of NUC8i5BEHS
   become: false  # Add this to prevent permission issues
 
+# - name: Check if kube-state-metrics config exists
+#   ansible.builtin.stat:
+#     path: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+#   register: kube_state_metrics_config_file
+#   delegate_to: "{{ groups['ansible_controller'][0] }}"
+#   become: false
+
+# - name: Load kube-state-metrics scrape config if available
+#   ansible.builtin.include_vars:
+#     file: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+#     name: kube_state_metrics_scrape_config
+#   when: kube_state_metrics_config_file.stat.exists
+#   delegate_to: "{{ groups['ansible_controller'][0] }}"
+#   become: false
+
 - name: Fail if kubeconfig doesn't exist
   ansible.builtin.fail:
     msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."

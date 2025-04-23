@@ -4,7 +4,7 @@
   become: false
   gather_facts: false
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     traefik_namespace: kube-system
     control_plane_ip:
       "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']

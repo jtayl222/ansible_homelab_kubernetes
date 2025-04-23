@@ -1,2 +1,274 @@
-null
-...
+# Check prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  failed_when:
+    not kubeconfig_stat.stat.exists
+
+# Check if MLflow namespace exists
+- name: Check if MLflow namespace exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} get namespace {{ mlflow_namespace }} -o name 2>/dev/null || echo "not found"
+  register: mlflow_ns_check
+  changed_when: false
+
+- name: Fail if MLflow namespace doesn't exist
+  ansible.builtin.fail:
+    msg: MLflow namespace doesn't exist. Please run install_120_mlflow.yml first.
+  when:
+    "'not found' in mlflow_ns_check.stdout"
+
+# Ensure MLflow artifacts bucket exists in MinIO
+- name: Create MLflow artifacts bucket using AWS CLI
+  ansible.builtin.command:
+    cmd:
+      aws s3 mb s3://{{ minio_mlflow_bucket }} --endpoint-url http://{{ control_plane_ip
+      }}:{{ minio_nodeport }} --region us-east-1
+  delegate_to: localhost
+  register: bucket_create_result
+  failed_when: >
+    bucket_create_result.rc != 0 and  'BucketAlreadyExists' not in bucket_create_result.stderr
+    and
+    'BucketAlreadyOwnedByYou' not in bucket_create_result.stderr
+  changed_when:
+    bucket_create_result.rc == 0 and 'BucketAlreadyOwnedByYou' not in
+    bucket_create_result.stderr
+
+# Check for existing model server
+- name: Check if model server deployment exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
+    get deployment mlflow-model-{{ model_name | lower }}-server -o name 2>/dev/null || echo "not found"
+  register: model_server_check
+  changed_when: false
+
+- name: Display model server status
+  ansible.builtin.debug:
+    msg:
+      "Model server deployment: {{ 'Already exists' if 'not found' not in model_server_check.stdout
+      else 'Will be created' }}"
+
+# Check if model exists in MLflow registry
+- name: Check if model exists in MLflow registry
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} run curl-test \
+      --quiet --rm -i --restart=Never \
+      --image=curlimages/curl -- curl -s {{ mlflow_service }}/api/2.0/mlflow/registered-models/get-latest-versions?name={{ model_name }}
+  register: model_check
+  changed_when: false
+  ignore_errors: true
+
+- name: Display raw model check output
+  ansible.builtin.debug:
+    msg: "Raw model check output: {{ model_check.stdout }}"
+  when:
+    model_check is defined and model_check.stdout is defined
+
+# Set the default first
+- name: Set default empty model check JSON
+  ansible.builtin.set_fact:
+    model_check_json:
+      {}
+
+# Try parsing with conditional
+- name: Parse model check JSON if possible
+  ansible.builtin.set_fact:
+    model_check_json: "{{ model_check.stdout | from_json }}"
+  when: model_check is defined and model_check.stdout is defined and model_check.stdout | trim != ""
+  failed_when: false
+
+# Log about parsing attempts
+- name: Log about model check
+  ansible.builtin.debug:
+    msg:
+      Model data was {{ 'successfully' if model_check_json is defined and model_check_json
+      != {} else 'not' }} parsed from API response
+
+- name: Display model check results
+  ansible.builtin.debug:
+    msg:
+      "Model check results: {{ model_check_json.model_versions[0].current_stage
+      if model_check_json is defined and model_check_json.model_versions is defined
+      and model_check_json.model_versions | length > 0 else 'Model not found in
+      registry' }}"
+  failed_when: false
+
+# Deploy model server
+- name: Deploy MLflow model server
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: mlflow-model-{{ model_name | lower }}-server
+        namespace: "{{ mlflow_namespace }}"
+        labels:
+          app: mlflow-model-server
+          model: "{{ model_name }}"
+      spec:
+        replicas: "{{ model_replicas }}"
+        selector:
+          matchLabels:
+            app: mlflow-model-server
+            model: "{{ model_name }}"
+        template:
+          metadata:
+            labels:
+              app: mlflow-model-server
+              model: "{{ model_name }}"
+          spec:
+            containers:
+              - name: mlflow-model-server
+                image: "{{ mlflow_image }}"
+                imagePullPolicy: IfNotPresent
+                ports:
+                  - containerPort: "{{ model_port }}"
+                    name: http
+                command: [/bin/sh, -c]
+                args:
+                  - |
+                    pip install boto3 defusedxml torch torchvision
+                    mlflow models serve -m "{{ model_uri }}" --host=0.0.0.0 --port={{ model_port }} --no-conda
+                env:
+                  - name: MLFLOW_TRACKING_URI
+                    value: "{{ mlflow_service }}"
+                  - name: AWS_ACCESS_KEY_ID
+                    value: "{{ minio_access_key }}"
+                  - name: AWS_SECRET_ACCESS_KEY
+                    value: "{{ minio_secret_key }}"
+                  - name: MLFLOW_S3_ENDPOINT_URL
+                    value: "{{ minio_endpoint }}"
+                  - name: MLFLOW_S3_IGNORE_TLS
+                    value: "true"
+                readinessProbe:
+                  httpGet:
+                    path: /health
+                    port: "{{ model_port }}"
+                  initialDelaySeconds: 180
+                  periodSeconds: 30
+                  timeoutSeconds: 10
+                  failureThreshold: 10
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: "{{ model_port }}"
+                  initialDelaySeconds: 300
+                  periodSeconds: 20
+                resources:
+                  requests:
+                    memory: 4Gi
+                    cpu: 1000m
+                  limits:
+                    memory: 8Gi
+                    cpu: 5000m
+
+# Create Service for the model server
+- name: Create model server service
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: mlflow-model-{{ model_name | lower }}-server
+        namespace: "{{ mlflow_namespace }}"
+        labels:
+          app: mlflow-model-server
+          model: "{{ model_name }}"
+      spec:
+        ports:
+          - port: "{{ model_port }}"
+            targetPort: "{{ model_port }}"
+            protocol: TCP
+            name: http
+        selector:
+          app: mlflow-model-server
+          model: "{{ model_name }}"
+
+# Create Ingress for model server
+- name: Create Traefik IngressRoute for model server
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: mlflow-model-{{ model_name | lower }}-server
+        namespace: "{{ mlflow_namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: Host(`{{ model_host }}`)
+            kind: Rule
+            services:
+              - name: mlflow-model-{{ model_name | lower }}-server
+                port: "{{ model_port }}"
+
+# Wait for deployment to be ready
+- name: Wait for model server deployment to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
+    rollout status deployment mlflow-model-{{ model_name | lower }}-server --timeout=180s
+  register: model_server_rollout
+  changed_when:
+    false
+
+# Check model server logs
+- name: Check model server pod logs
+  ansible.builtin.shell: |
+    POD_NAME=$(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
+    get pods -l app=mlflow-model-server,model={{ model_name }} -o jsonpath='{.items[0].metadata.name}')
+    if [ -n "$POD_NAME" ]; then
+      kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} logs $POD_NAME --tail=20
+    else
+      echo "No model server pod found"
+    fi
+  register: model_server_logs
+  changed_when: false
+  ignore_errors: true
+
+- name: Display model server logs
+  ansible.builtin.debug:
+    msg:
+      "{{ model_server_logs.stdout_lines }}"
+
+# Test model server API
+- name: Test model server health endpoint
+  ansible.builtin.uri:
+    url: http://{{ control_plane_ip }}:{{ model_port }}/health
+    return_content: yes
+    status_code: [200, 404]
+  register: model_health_check
+  failed_when:
+    false
+
+# Display installation summary
+- name: Display model server installation summary
+  ansible.builtin.debug:
+    msg:
+      - ==================== MLFLOW MODEL SERVER SUMMARY ====================
+      - "MLflow model server has been deployed for model: {{ model_name }}"
+      - ""
+      - "Access URLs:"
+      - "- Model server API: http://{{ model_host }}/"
+      - "- Health endpoint: http://{{ model_host }}/health"
+      - "- Invocations endpoint: http://{{ model_host }}/invocations"
+      - ""
+      - "Testing the model server:"
+      - "- Use curl to send prediction requests to the invocations endpoint"
+      - "- Example: curl -X POST -H 'Content-Type: application/json' -d '{\"inputs\"\
+        : [[...your input data...]]' http://{{ model_host }}/invocations"
+      - ""
+      - "Server status:"
+      - "- Deployment: {{ 'Ready' if model_server_rollout.rc == 0 else 'Failed to
+        start' }}"
+      - "- Health check: {{ model_health_check.status if model_health_check is defined
+        and model_health_check.status is defined else 'Failed' }}"
+      - ==================================================================

@@ -1,0 +1,5 @@
+- name: Test playbook for prometheus_operator role
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - prometheus_operator

@@ -1,2 +1,359 @@
 ---
-# tasks file for roles/kube_state_metrics
+# Kube State Metrics deployment tasks
+
+# Verify prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create namespace if it doesn't exist
+- name: Ensure monitoring namespace exists
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ kube_state_metrics_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create service account
+- name: Create kube-state-metrics ServiceAccount
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: "{{ kube_state_metrics_service_account }}"
+        namespace: "{{ kube_state_metrics_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create ClusterRole
+- name: Create kube-state-metrics ClusterRole
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: kube-state-metrics
+      rules:
+        - apiGroups:
+            - ""
+          resources:
+            - configmaps
+            - secrets
+            - nodes
+            - pods
+            - services
+            - resourcequotas
+            - replicationcontrollers
+            - limitranges
+            - persistentvolumeclaims
+            - persistentvolumes
+            - namespaces
+            - endpoints
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - apps
+          resources:
+            - statefulsets
+            - daemonsets
+            - deployments
+            - replicasets
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - batch
+          resources:
+            - cronjobs
+            - jobs
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - autoscaling
+          resources:
+            - horizontalpodautoscalers
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - authentication.k8s.io
+          resources:
+            - tokenreviews
+          verbs:
+            - create
+        - apiGroups:
+            - authorization.k8s.io
+          resources:
+            - subjectaccessreviews
+          verbs:
+            - create
+        - apiGroups:
+            - policy
+          resources:
+            - poddisruptionbudgets
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - certificates.k8s.io
+          resources:
+            - certificatesigningrequests
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - storage.k8s.io
+          resources:
+            - storageclasses
+            - volumeattachments
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - admissionregistration.k8s.io
+          resources:
+            - mutatingwebhookconfigurations
+            - validatingwebhookconfigurations
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - networking.k8s.io
+          resources:
+            - networkpolicies
+            - ingresses
+          verbs:
+            - list
+            - watch
+        - apiGroups:
+            - coordination.k8s.io
+          resources:
+            - leases
+          verbs:
+            - list
+            - watch
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create ClusterRoleBinding
+- name: Create kube-state-metrics ClusterRoleBinding
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRoleBinding
+      metadata:
+        name: kube-state-metrics
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: kube-state-metrics
+      subjects:
+        - kind: ServiceAccount
+          name: "{{ kube_state_metrics_service_account }}"
+          namespace: "{{ kube_state_metrics_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create Deployment
+- name: Create kube-state-metrics Deployment
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: kube-state-metrics
+        namespace: "{{ kube_state_metrics_namespace }}"
+      spec:
+        replicas: "{{ kube_state_metrics_replicas }}"
+        selector:
+          matchLabels:
+            app: kube-state-metrics
+        template:
+          metadata:
+            labels:
+              app: kube-state-metrics
+          spec:
+            serviceAccountName: "{{ kube_state_metrics_service_account }}"
+            containers:
+              - name: kube-state-metrics
+                image: "{{ kube_state_metrics_image }}"
+                ports:
+                  - containerPort: "{{ kube_state_metrics_port }}"
+                    name: http-metrics
+                  - containerPort: "{{ kube_state_metrics_telemetry_port }}"
+                    name: telemetry
+                livenessProbe:
+                  httpGet:
+                    path: /healthz
+                    port: "{{ kube_state_metrics_telemetry_port }}"
+                  initialDelaySeconds: 5
+                  timeoutSeconds: 5
+                readinessProbe:
+                  httpGet:
+                    path: /
+                    port: "{{ kube_state_metrics_telemetry_port }}"
+                  initialDelaySeconds: 5
+                  timeoutSeconds: 5
+                resources:
+                  requests:
+                    memory: "{{ kube_state_metrics_resources.requests.memory }}"
+                    cpu: "{{ kube_state_metrics_resources.requests.cpu }}"
+                  limits:
+                    memory: "{{ kube_state_metrics_resources.limits.memory }}"
+                    cpu: "{{ kube_state_metrics_resources.limits.cpu }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create Service
+- name: Create kube-state-metrics Service
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: kube-state-metrics
+        namespace: "{{ kube_state_metrics_namespace }}"
+        labels:
+          app: kube-state-metrics
+      spec:
+        ports:
+          - name: http-metrics
+            port: "{{ kube_state_metrics_port }}"
+            targetPort: http-metrics
+          - name: telemetry
+            port: "{{ kube_state_metrics_telemetry_port }}"
+            targetPort: telemetry
+        selector:
+          app: kube-state-metrics
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Add this task before creating the ServiceMonitor
+- name: Check if ServiceMonitor CRD exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" get crd servicemonitors.monitoring.coreos.com -o name 2>/dev/null || echo "not_found"
+  register: service_monitor_crd
+  become: false
+  changed_when: false
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+# Create ServiceMonitor for Prometheus Operator (if enabled)
+- name: Create kube-state-metrics ServiceMonitor
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    validate_certs: false  # Add this to skip certificate validation
+    state: present
+    definition:
+      apiVersion: monitoring.coreos.com/v1
+      kind: ServiceMonitor
+      metadata:
+        name: kube-state-metrics
+        namespace: "{{ kube_state_metrics_namespace }}"
+        labels:
+          app: kube-state-metrics
+      spec:
+        selector:
+          matchLabels:
+            app: kube-state-metrics
+        endpoints:
+          - port: http-metrics
+            interval: "{{ kube_state_metrics_scrape_interval }}"
+            scrapeTimeout: "{{ kube_state_metrics_scrape_timeout }}"
+          - port: telemetry
+            interval: "{{ kube_state_metrics_scrape_interval }}"
+            scrapeTimeout: "{{ kube_state_metrics_scrape_timeout }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  # Only create ServiceMonitor if the CRD exists AND service monitor is enabled
+  when:
+    - service_monitor_crd.stdout != "not_found"
+    - kube_state_metrics_service_monitor_enabled | bool
+
+- name: Display warning if ServiceMonitor CRD not found
+  ansible.builtin.debug:
+    msg:
+      - "WARNING: The ServiceMonitor CRD was not found in the cluster."
+      - "This typically means the Prometheus Operator is not installed."
+      - "The ServiceMonitor for kube-state-metrics was not created."
+      - "Install prometheus-operator first or set kube_state_metrics_service_monitor_enabled: false"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when:
+    - service_monitor_crd.stdout == "not_found"
+    - kube_state_metrics_service_monitor_enabled | bool
+
+# Wait for deployment to be available
+- name: Wait for kube-state-metrics deployment to be ready
+  kubernetes.core.k8s_info:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: apps/v1
+    kind: Deployment
+    name: kube-state-metrics
+    namespace: "{{ kube_state_metrics_namespace }}"
+  register: kube_state_metrics_deployment
+  until: kube_state_metrics_deployment.resources[0].status.availableReplicas is defined and
+    kube_state_metrics_deployment.resources[0].status.availableReplicas > 0
+  retries: 10
+  delay: 15
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Add this task before the completion message:
+
+- name: Create Prometheus scrape config for kube-state-metrics
+  ansible.builtin.template:
+    src: prometheus-scrape-config.yml.j2
+    dest: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+    mode: '0644'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Display notice about Prometheus configuration
+  ansible.builtin.debug:
+    msg:
+      - "IMPORTANT: To scrape metrics from kube-state-metrics, you must add the"
+      - "configuration from {{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+      - "to your Prometheus scrape_configs."
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Display completion message
+- name: Display Kube State Metrics installation summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================"
+      - "Kube State Metrics has been deployed successfully"
+      - "Namespace: {{ kube_state_metrics_namespace }}"
+      - "Service: kube-state-metrics:{{ kube_state_metrics_port }}"
+      - "Service Monitor: {{ 'Enabled' if kube_state_metrics_service_monitor_enabled else 'Disabled' }}"
+      - "============================================"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false

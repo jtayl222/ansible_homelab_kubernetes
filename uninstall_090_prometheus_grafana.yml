@@ -3,7 +3,7 @@
   become: true
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     prometheus_namespace: monitoring
     prometheus_release_name: prometheus
   tasks:
@@ -43,7 +43,7 @@
 
         - name: Create Helm lock cleanup script
           ansible.builtin.copy:
-            dest: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
+            dest: "{{ playbook_dir }}/../fetched_tokens//cleanup_helm_locks.sh"
             mode: "0755"
             content: |
               #!/bin/bash
@@ -72,7 +72,7 @@
 
         - name: Run Helm lock cleanup script
           ansible.builtin.command:
-            cmd: "{{ playbook_dir }}/fetched_tokens/cleanup_helm_locks.sh"
+            cmd: "{{ playbook_dir }}/../fetched_tokens//cleanup_helm_locks.sh"
           delegate_to: "{{ groups['ansible_controller'][0] }}"
           become: false
           register: helm_lock_cleanup
@@ -173,7 +173,7 @@
       # Remove CRDs
     - name: Create CRD cleanup script
       ansible.builtin.copy:
-        dest: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
+        dest: "{{ playbook_dir }}/../fetched_tokens//remove_crds.sh"
         mode: "0755"
         content: |
           #!/bin/bash
@@ -189,7 +189,7 @@
 
     - name: Run CRD cleanup script
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/fetched_tokens/remove_crds.sh"
+        cmd: "{{ playbook_dir }}/../fetched_tokens//remove_crds.sh"
       delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: existing_prometheus.stdout | length > 0
@@ -220,7 +220,7 @@
       # Run finalizers removal in case namespace is stuck
     - name: Create finalizer removal script
       ansible.builtin.copy:
-        dest: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
+        dest: "{{ playbook_dir }}/../fetched_tokens//remove_finalizers.sh"
         mode: "0755"
         content: |
           #!/bin/bash
@@ -244,7 +244,7 @@
 
     - name: Run finalizer removal script
       ansible.builtin.command:
-        cmd: "{{ playbook_dir }}/fetched_tokens/remove_finalizers.sh"
+        cmd: "{{ playbook_dir }}/../fetched_tokens//remove_finalizers.sh"
       delegate_to: "{{ groups['ansible_controller'][0] }}"
       become: false
       when: namespace_check.stdout | length > 0

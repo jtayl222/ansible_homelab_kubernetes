@@ -3,7 +3,7 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     argowf_namespace: argowf
     argowf_version: v3.6.5
     argowf_install_url:

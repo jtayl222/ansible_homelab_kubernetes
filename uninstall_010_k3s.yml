@@ -159,7 +159,7 @@
   tasks:
     - name: Remove local kubeconfig and token files
       ansible.builtin.file:
-        path: "{{ playbook_dir }}/fetched_tokens"
+        path: "{{ playbook_dir }}/../fetched_tokens/"
         state: absent
       register: remove_local_files
       failed_when: false

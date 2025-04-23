@@ -2,7 +2,7 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     seldon_namespace: seldon-system
     seldon_chart_repo: seldon
     seldon_chart_name: seldon-core-operator
@@ -220,7 +220,7 @@
       # 4. Clean up local example files
     - name: Remove local example files
       ansible.builtin.file:
-        path: "{{ playbook_dir }}/seldon-examples"
+        path: "{{ playbook_dir }}/../seldon-examples"
         state: absent
       register: file_removal
       become: false

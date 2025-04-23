@@ -1,0 +1,11 @@
+- name: Install argo CD and Argo Workfloe on K3s
+  hosts: localhost
+  connection: local
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all/common.yml
+
+  roles:
+    - argo_cd
+    - argo_workflows

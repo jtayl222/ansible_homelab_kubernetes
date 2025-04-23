@@ -1,0 +1,27 @@
+---
+# Machine Learning infrastructure playbook
+
+# First, prepare Kubernetes access
+- name: Prepare Kubernetes access
+  hosts: localhost
+  gather_facts: false
+
+# Deploy MLflow tracking server
+- name: Deploy MLflow Tracking Server
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml
+  roles:
+    - mlflow  # Assuming you also have an mlflow role
+
+# Deploy MLflow Model Server
+- name: Deploy MLflow Model Server
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml
+  roles:
+    - mlflow_model_server

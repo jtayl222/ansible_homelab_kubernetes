@@ -1,18 +1,16 @@
 ---
-- name: Install Monitoring Stack
+# Monitoring stack deployment
+- name: Deploy Monitoring Stack
   hosts: localhost
   connection: local
   gather_facts: false
-
   vars_files:
     - ../group_vars/all/common.yml
-
   vars:
     prometheus_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd"
-
   roles:
+    - kube_state_metrics
     - prometheus
     - grafana
     - metrics_server
-    - kube_state_metrics
     - node_exporter

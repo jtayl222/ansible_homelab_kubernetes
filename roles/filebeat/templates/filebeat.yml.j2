@@ -1,0 +1,82 @@
+###################### Filebeat Configuration #######################
+
+filebeat.inputs:
+{% if filebeat_collect_container_logs %}
+- type: container
+  paths:
+    - /var/lib/docker/containers/*/*.log
+  processors:
+    - add_kubernetes_metadata:
+        host: ${NODE_NAME}
+        matchers:
+        - logs_path:
+            logs_path: "/var/lib/docker/containers/"
+{% endif %}
+
+{% if filebeat_collect_system_logs %}
+- type: log
+  enabled: true
+  paths:
+    - /var/log/syslog
+    - /var/log/auth.log
+  fields:
+    type: syslog
+  fields_under_root: true
+{% endif %}
+
+{% if filebeat_collect_node_logs %}
+- type: log
+  enabled: true
+  paths:
+    - /var/log/containerd.log
+    - /var/log/k3s.log
+  fields:
+    type: k8s-node
+  fields_under_root: true
+{% endif %}
+
+# Processors for common operations
+processors:
+  - add_cloud_metadata: ~
+  - add_host_metadata: ~
+{% if filebeat_collect_k8s_metadata %}
+  - add_kubernetes_metadata:
+      host: ${NODE_NAME}
+{% endif %}
+  - drop_event:
+      when:
+        has_fields: ["kubernetes.container.name"]
+        equals:
+          kubernetes.container.name: "filebeat"
+
+# Output configuration
+output.elasticsearch:
+  hosts: ["${ELASTICSEARCH_HOST}"]
+  username: "${ELASTICSEARCH_USERNAME}"
+  password: "${ELASTICSEARCH_PASSWORD}"
+  ssl.verification_mode: "none"
+  setup.ilm.enabled: true
+
+# Setup template loading
+setup.template.name: "filebeat"
+setup.template.pattern: "filebeat-*"
+setup.template.enabled: true
+setup.template.overwrite: true
+
+# Index pattern settings
+setup.ilm.enabled: true
+setup.ilm.rollover_alias: "filebeat"
+setup.ilm.pattern: "{now/d}-000001"
+
+# Kibana setup
+setup.kibana:
+  host: "{{ filebeat_kibana_host }}"
+
+# Logging settings
+logging.level: {{ filebeat_log_level }}
+logging.to_files: true
+logging.files:
+  path: /var/log/filebeat
+  name: filebeat.log
+  keepfiles: 7
+  permissions: 0640

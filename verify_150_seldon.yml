@@ -2,14 +2,14 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: '{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig'
+    kubeconfig_path: '{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig'
     seldon_namespace: seldon-system
     control_plane_ip: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
       }}"
     seldon_host: seldon.{{ control_plane_ip }}.nip.io
     seldon_nodeport: 30150
     iris_model_name: iris-model
-    test_data_path: '{{ playbook_dir }}/seldon-examples/test-data.json'
+    test_data_path: '{{ playbook_dir }}/../seldon-examples/test-data.json'
   tasks:
     # 1. Verify prerequisites
     - name: Ensure kubeconfig exists
@@ -270,7 +270,7 @@
     # 17. Check if examples directory exists
     - name: Check for examples directory
       ansible.builtin.stat:
-        path: '{{ playbook_dir }}/seldon-examples'
+        path: '{{ playbook_dir }}/../seldon-examples'
       register: examples_dir
 
     - name: Display examples status
@@ -281,7 +281,7 @@
     # 18. Verify if test script exists
     - name: Check for test script
       ansible.builtin.stat:
-        path: '{{ playbook_dir }}/seldon-examples/test-iris-model.sh'
+        path: '{{ playbook_dir }}/../seldon-examples/test-iris-model.sh'
       register: test_script
 
     - name: Display test script status
@@ -292,7 +292,7 @@
     # 19. Summary report of verification - using template file to avoid Jinja errors
     - name: Ensure seldon-examples directory exists
       ansible.builtin.file:
-        path: '{{ playbook_dir }}/seldon-examples'
+        path: '{{ playbook_dir }}/../seldon-examples'
         state: directory
         mode: '0755'
       become: false
@@ -300,12 +300,12 @@
     - name: Create verification summary report
       ansible.builtin.template:
         src: seldon_verification_summary.j2
-        dest: '{{ playbook_dir }}/seldon-examples/verification_report.txt'
+        dest: '{{ playbook_dir }}/../seldon-examples/verification_report.txt'
         mode: '0644'  # Adding appropriate file permissions
       become: false
 
     - name: Display verification summary
-      ansible.builtin.command: cat "{{ playbook_dir }}/seldon-examples/verification_report.txt"
+      ansible.builtin.command: cat "{{ playbook_dir }}/../seldon-examples/verification_report.txt"
       register: summary_output
       become: false
       changed_when: false

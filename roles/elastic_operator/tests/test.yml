@@ -3,4 +3,4 @@
   hosts: ansible_controller
   remote_user: user
   roles:
-    - eck_operator
+    - elastic_operator

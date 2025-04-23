@@ -7,6 +7,7 @@
     - ../group_vars/all/common.yml
 
   roles:
-    - eck_operator
+    - elastic_operator
     - elasticsearch
     - kibana
+    - filebeat

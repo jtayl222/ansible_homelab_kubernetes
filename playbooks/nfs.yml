@@ -18,3 +18,5 @@
   connection: local
   vars_files:
     - ../group_vars/all/common.yml
+  roles:
+    - nfs_provisioner

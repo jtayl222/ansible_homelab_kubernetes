@@ -1,0 +1,23 @@
+# Look for your scrape_configs section and add:
+
+scrape_configs:
+  # Your existing scrape configs
+  # ...
+  
+  # Include kube-state-metrics config if available
+  {% if kube_state_metrics_scrape_config is defined %}
+  {{ kube_state_metrics_scrape_config | to_nice_yaml(indent=2) | indent(2) }}
+  {% endif %}
+
+# This should already exist in roles/kube_state_metrics/tasks/prometheus_config.yml
+- name: Generate kube-state-metrics scrape config for Prometheus
+  ansible.builtin.template:
+    src: prometheus-scrape-config.yml.j2
+    dest: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+    mode: '0644'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Add to the end of roles/kube_state_metrics/tasks/main.yml
+- name: Generate Prometheus scrape configuration
+  ansible.builtin.include_tasks: prometheus_config.yml

@@ -1,0 +1,7 @@
+- name: Install Argo Workflows on K3s
+  connection: local
+  gather_facts: false
+  vars_files:
+    - ../group_vars/all/common.yml
+  roles:
+    - argo_workflows

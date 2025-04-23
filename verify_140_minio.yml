@@ -2,7 +2,7 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     minio_namespace: minio
     control_plane_ip:
       "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']

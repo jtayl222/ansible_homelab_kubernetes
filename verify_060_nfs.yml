@@ -2,7 +2,7 @@
   hosts: utility
   gather_facts: true
   vars:
-    kubeconfig_path: "{{ playbook_dir }}/fetched_tokens/k3s-kubeconfig"
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
     test_namespace: nfs-test
     nfs_server_ip: "{{ hostvars[groups['nfs_server'][0]]['ansible_host'] }}"
     nfs_path: /srv/nfs/kubernetes

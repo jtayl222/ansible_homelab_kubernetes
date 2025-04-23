@@ -1,0 +1,13 @@
+- job_name: 'kube-state-metrics'
+  kubernetes_sd_configs:
+    - role: service
+      namespaces:
+        names:
+          - {{ kube_state_metrics_namespace }}
+  relabel_configs:
+    - source_labels: [__meta_kubernetes_service_name]
+      regex: kube-state-metrics
+      action: keep
+    - source_labels: [__meta_kubernetes_service_port_name] 
+      regex: http-metrics
+      action: keep

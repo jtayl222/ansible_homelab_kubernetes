@@ -1,45 +1,14 @@
-- name: Set control plane host fact
-  ansible.builtin.set_fact:
-    control_plane_host: "{{ groups['k3s_control_plane'][0] }}"
-  when: groups['k3s_control_plane'] is defined and groups['k3s_control_plane']|length > 0
-
-- name: Check if k3s.yaml exists on control plane
+- name: Ensure kubeconfig exists
   ansible.builtin.stat:
-    path: "{{ k3s_server_path }}"
-  delegate_to: "{{ control_plane_host }}"
-  register: k3s_yaml_stat
-  become: true
-  when: control_plane_host is defined
-
-- name: Debug k3s.yaml status
-  ansible.builtin.debug:
-    msg: "k3s.yaml exists: {{ k3s_yaml_stat.stat.exists if k3s_yaml_stat.stat is defined else 'unknown' }}"
-  when: control_plane_host is defined
-
-- name: Fetch kubeconfig from control plane node
-  ansible.builtin.fetch:
-    src: "{{ k3s_server_path }}"
-    dest: "{{ kubeconfig_path }}"
-    flat: true
-  become: true
-  delegate_to: "{{ control_plane_host }}"
-  when:
-    - control_plane_host is defined
-    - k3s_yaml_stat.stat is defined
-    - k3s_yaml_stat.stat.exists
-
-- name: Update kubeconfig to use cluster IP
-  ansible.builtin.replace:
     path: "{{ kubeconfig_path }}"
-    regexp: https://127.0.0.1:6443
-    replace: https://{{ ansible_host }}:6443
+  register: kubeconfig_stat
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
-- name: Fix permissions on kubeconfig
-  ansible.builtin.file:
-    path: "{{ kubeconfig_path }}"
-    mode: "0600"
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 

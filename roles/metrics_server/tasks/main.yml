@@ -25,7 +25,7 @@
   # Create a custom dashboard for K3s Pod Monitoring
 - name: Create additional dashboards ConfigMap
   ansible.builtin.copy:
-    dest: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
+    dest: "{{ playbook_dir }}/../fetched_tokens//additional-dashboards.yaml"
     mode: '0644'  # Add explicit file permissions
     content: |
       apiVersion: v1
@@ -133,14 +133,14 @@
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/fetched_tokens/additional-dashboards.yaml"
+    src: "{{ playbook_dir }}/../fetched_tokens//additional-dashboards.yaml"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
   # Create custom alerts
 - name: Create Custom Prometheus Rules
   ansible.builtin.copy:
-    dest: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
+    dest: "{{ playbook_dir }}/../fetched_tokens//custom-prometheus-rules.yaml"
     mode: '0644'  # Add explicit file permissions
     content: |
       apiVersion: monitoring.coreos.com/v1
@@ -186,7 +186,7 @@
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
     state: present
-    src: "{{ playbook_dir }}/fetched_tokens/custom-prometheus-rules.yaml"
+    src: "{{ playbook_dir }}/../fetched_tokens//custom-prometheus-rules.yaml"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
