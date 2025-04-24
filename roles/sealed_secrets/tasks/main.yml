@@ -1,0 +1,30 @@
+---
+# Verify prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Add Bitnami Helm repo
+  kubernetes.core.helm_repository:
+    name: sealed-secrets
+    repo_url: https://bitnami-labs.github.io/sealed-secrets
+
+- name: Install Sealed Secrets controller
+  kubernetes.core.helm:
+    name: sealed-secrets-controller
+    chart_ref: sealed-secrets/sealed-secrets
+    release_namespace: kube-system
+    create_namespace: false
+    wait: true
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
