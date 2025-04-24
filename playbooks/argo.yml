@@ -1,4 +1,4 @@
-- name: Install argo CD and Argo Workfloe on K3s
+- name: Install argo CD and Argo Workflows on K3s
   hosts: localhost
   connection: local
   gather_facts: false
