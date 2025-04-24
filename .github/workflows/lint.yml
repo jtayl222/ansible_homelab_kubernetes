@@ -31,7 +31,7 @@ jobs:
 
       - name: Check Ansible playbook syntax
         run: |
-          ansible-playbook install_010_site.yml --syntax-check
+          ansible-playbook site.yml --syntax-check
 
       - name: Run pre-commit hooks
         run: pre-commit run --all-files --show-diff-on-failure
