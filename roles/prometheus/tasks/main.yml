@@ -99,7 +99,7 @@
 
 - name: Create CRD installation script
   ansible.builtin.copy:
-    dest: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
+    dest: "{{ playbook_dir }}/../fetched_tokens/install_crds.sh"
     mode: "0755"
     content: |
       #!/bin/bash
@@ -121,7 +121,7 @@
 
 - name: Run CRD installation script
   ansible.builtin.command:
-    cmd: "{{ playbook_dir }}/fetched_tokens/install_crds.sh"
+    cmd: "{{ playbook_dir }}/../fetched_tokens/install_crds.sh"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: crd_installation

@@ -215,10 +215,12 @@
 - name: Wait for model server deployment to be ready
   ansible.builtin.shell: |
     kubectl --kubeconfig={{ kubeconfig_path }} -n {{ mlflow_namespace }} \
-    rollout status deployment mlflow-model-{{ model_name | lower }}-server --timeout=180s
+    rollout status deployment mlflow-model-{{ model_name | lower }}-server --timeout=30s
   register: model_server_rollout
-  changed_when:
-    false
+  changed_when: false
+  retries: 10
+  delay: 10
+  until: model_server_rollout.rc == 0
 
 # Check model server logs
 - name: Check model server pod logs

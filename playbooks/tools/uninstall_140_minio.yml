@@ -1,6 +1,6 @@
 # filepath: /home/user/ansible_homelab_kubernetes/uninstall_140_minio.yml
 - name: Uninstall MinIO Object Storage
-  hosts: utility
+  hosts: ansible_controller
   gather_facts: true
   vars:
     kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"

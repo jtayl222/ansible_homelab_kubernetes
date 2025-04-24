@@ -1,20 +1,11 @@
 ---
-# Deploy Traefik Ingress Controller
-- name: Deploy Traefik Ingress Controller
+# Step 3: Network Infrastructure
+- name: Setup Network Infrastructure
   hosts: localhost
   connection: local
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml  # Ensure this is properly referenced
   roles:
-    - traefik
-
-# Deploy Kubernetes Dashboard
-- name: Deploy Kubernetes Dashboard
-  hosts: localhost
-  connection: local
-  gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
-  roles:
-    - k8s_dashboard
+    - role: traefik
+      tags: [network, ingress, traefik]
+    - role: k8s_dashboard
+      tags: [network, dashboard]

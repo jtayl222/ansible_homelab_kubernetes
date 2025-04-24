@@ -1,3 +1,9 @@
+- name: Debug NFS variables
+  ansible.builtin.debug:
+    msg:
+      - "kubeconfig_path: {{ kubeconfig_path | default('undefined') }}"
+  become: false
+
 - name: Ensure kubeconfig exists
   ansible.builtin.stat:
     path: "{{ kubeconfig_path }}"

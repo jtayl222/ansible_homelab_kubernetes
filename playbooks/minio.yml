@@ -1,0 +1,7 @@
+- name: Setup Kubernetes Storage Components
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: minio
+      tags: [storage, minio]

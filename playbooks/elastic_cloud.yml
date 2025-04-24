@@ -1,13 +1,14 @@
-- name: Install ECK Operator
+# Step 5: Elastic Stack
+- name: Setup Elastic Cloud on Kubernetes
   hosts: localhost
   connection: local
   gather_facts: false
-
-  vars_files:
-    - ../group_vars/all/common.yml
-
   roles:
-    - elastic_operator
-    - elasticsearch
-    - kibana
-    - filebeat
+    - role: elastic_operator
+      tags: [elastic, eck, operator]
+    - role: elasticsearch
+      tags: [elastic, eck, elasticsearch]
+    - role: kibana
+      tags: [elastic, eck, kibana]
+    - role: filebeat
+      tags: [elastic, eck, filebeat]

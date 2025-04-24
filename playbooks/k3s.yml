@@ -3,8 +3,6 @@
   hosts: k3s_control_plane
   become: true
   gather_facts: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: k3s_control_plane
       tags: [k3s, control_plane]
@@ -12,8 +10,6 @@
 - name: Fetch kubeconfig to localhost
   hosts: localhost
   gather_facts: false
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: fetch_kubeconfig
       tags: [k3s, kubeconfig]
@@ -22,8 +18,6 @@
   hosts: k3s_workers
   become: true
   gather_facts: true
-  vars_files:
-    - ../group_vars/all/common.yml
   roles:
     - role: k3s_workers
       tags: [k3s, workers]

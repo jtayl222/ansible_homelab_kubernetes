@@ -19,3 +19,4 @@ minio_console_ingress_host: console.minio.local
 minio_chart_version: latest  # Use specific version in production
 minio_release_name: minio
 minio_chart_repository: https://charts.min.io/
+minio_chart_repo: bitnami

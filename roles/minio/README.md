@@ -173,7 +173,7 @@ aws --endpoint-url $AWS_ENDPOINT_URL s3 cp model.pkl s3://mlflow/
 #### Set Up an Alias
 
 ```bash
-mc alias set localminio http://localhost:9000 minioadmin minioadmin
+mc alias set localminio http://minio.local/ minioadmin minioadmin
 ```
 
 #### Create a Bucket and Upload a File
