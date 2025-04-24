@@ -21,8 +21,15 @@ k3s-worker-1
 k3s-worker-2
 
 # Define utility nodes (not part of the K8s cluster)
-[utility]
+[ansible_controller]
 external-node
 
 [nfs_server]
 external-node
+
+[nfs_clients]
+k3s-control-1
+k3s-control-2
+k3s-control-3
+k3s-worker-1
+k3s-worker-2
