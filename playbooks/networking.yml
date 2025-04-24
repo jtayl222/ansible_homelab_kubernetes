@@ -1,0 +1,11 @@
+---
+# Step 3: Network Infrastructure
+- name: Setup Network Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: traefik
+      tags: [network, ingress, traefik]
+    - role: k8s_dashboard
+      tags: [network, dashboard]

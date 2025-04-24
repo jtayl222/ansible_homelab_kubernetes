@@ -1,0 +1,169 @@
+---
+# Kubernetes Homelab - Complete Installation
+# This playbook installs and configures all components of the Kubernetes homelab
+
+# Step 1: Setup K3s Cluster
+- name: Configure K3s Control Plane
+  hosts: k3s_control_plane
+  become: true
+  gather_facts: true
+  roles:
+    - role: k3s_control_plane
+      tags: [k3s, control_plane]
+
+- name: Fetch kubeconfig to localhost
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - role: fetch_kubeconfig
+      tags: [k3s, kubeconfig]
+
+- name: Configure K3s Worker Nodes
+  hosts: k3s_workers
+  become: true
+  gather_facts: true
+  roles:
+    - role: k3s_workers
+      tags: [k3s, workers]
+
+# Step 2: Setup Storage Infrastructure
+- name: Configure NFS Server
+  hosts: nfs_server
+  gather_facts: true
+  become: true
+  roles:
+    - role: nfs_server
+      tags: [storage, nfs, nfs-server]
+
+- name: Configure NFS Clients
+  hosts: k3s_control_plane:k3s_workers
+  gather_facts: true
+  become: true
+  roles:
+    - role: nfs_clients
+      tags: [storage, nfs, nfs-clients]
+
+- name: Setup Kubernetes Storage Components
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: nfs_provisioner
+      tags: [storage, nfs, nfs-provisioner]
+
+# Step 3: Network Infrastructure
+- name: Setup Network Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: traefik
+      tags: [network, ingress, traefik]
+    - role: k8s_dashboard
+      tags: [network, dashboard]
+
+# Sealed Secrets
+- name: Install Sealed Secrets controller
+  hosts: k3s_control_plane
+  become: true
+  roles:
+    - role: sealed_secrets
+
+# Step 4: Monitoring Stack
+- name: Setup Monitoring Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    prometheus_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.68.0/example/prometheus-operator-crd"
+  roles:
+    # - role: prometheus_operator  # <-- Add this role if you have it
+    #   tags: [monitoring, prometheus]
+    - role: kube_state_metrics   # <-- Run after prometheus operator
+      tags: [monitoring, kube-state-metrics]
+    - role: prometheus
+      tags: [monitoring, prometheus]
+    - role: grafana
+      tags: [monitoring, grafana]
+    - role: metrics_server
+    - role: node_exporter
+
+# MinIO - After NFS and Prometheus
+- name: Setup Kubernetes Storage Components
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: minio
+      tags: [storage, minio]
+
+
+# Step 5: Elastic Stack
+- name: Setup Elastic Cloud on Kubernetes
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: elastic_operator
+      tags: [elastic, eck, operator]
+    - role: elasticsearch
+      tags: [elastic, eck, elasticsearch]
+    - role: kibana
+      tags: [elastic, eck, kibana]
+    - role: filebeat
+      tags: [elastic, eck, filebeat]
+
+# Step 6: ML Infrastructure
+- name: Setup Machine Learning Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: mlflow
+      tags: [ml, mlflow]
+    - role: seldon
+      tags: [ml, seldon]
+
+# Step 7: ML Workflow Components
+- name: Setup ML Workflow Infrastructure
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  roles:
+    - role: argo_cd
+      tags: [mlops, argo_cd]
+    - role: argo_workflows
+      tags: [mlops, workflow, argowf]
+    - role: mlops_demo_app
+      tags: [mlops, demo]
+
+- name: Deploy MLOps demo application
+  hosts: k3s_control_plane
+  become: true
+  roles:
+    - mlops_demo_app
+
+# Final Step: Display completion banner
+- name: Display deployment complete banner
+  hosts: localhost
+  gather_facts: false
+  vars:
+    control_plane_address: "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host'] }}"
+  tasks:
+    - name: Display deployment complete banner
+      ansible.builtin.debug:
+        msg:
+          - "*******************************************************************"
+          - "*             KUBERNETES HOMELAB DEPLOYMENT COMPLETE              *"
+          - "*******************************************************************"
+          - ""
+          - "Access your services at:"
+          - "- Kubernetes Dashboard: https://{{ control_plane_address }}:{{ lookup('env', 'K8S_DASHBOARD_PORT') | default('30443') }}"
+          - "- Grafana: http://{{ control_plane_address }}:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/grafana"
+          - "- Prometheus: http://{{ control_plane_address }}:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/prometheus"
+          - "- Kibana: https://{{ control_plane_address }}:{{ lookup('env', 'KIBANA_NODE_PORT') | default('30056') }}/kibana"
+          - "- MLflow: http://{{ control_plane_address }}:{{ lookup('env', 'TRAEFIK_NODE_PORT') | default('32080') }}/mlflow"
+          - "- MinIO Console: http://{{ control_plane_address }}:{{ lookup('env', 'MINIO_CONSOLE_PORT') | default('30090') }}"
+          - "- Seldon Core API: http://{{ control_plane_address }}:{{ lookup('env', 'SELDON_NODE_PORT') | default('30150') }}/seldon/"
+          - ""
+          - "See documentation for credentials and further instructions."

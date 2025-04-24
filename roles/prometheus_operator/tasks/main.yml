@@ -1,0 +1,144 @@
+---
+# Prometheus Operator deployment using Helm
+
+# Verify prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  delegate_to: "{{ groups['ansible_controller'][0] }}"  # Use actual controller instead of localhost
+  become: false
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Namespace handling
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    validate_certs: false
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ prometheus_operator_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: prometheus_operator_create_namespace | bool
+
+# Add Prometheus Helm repository
+- name: Add Prometheus Helm repository
+  kubernetes.core.helm_repository:
+    name: prometheus-community
+    repo_url: https://prometheus-community.github.io/helm-charts
+    kubeconfig: "{{ kubeconfig_path }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Create CRD installation script
+- name: Create CRD installation script
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../fetched_tokens/install_prometheus_crds.sh"
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      KUBECONFIG="{{ kubeconfig_path }}"
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_alertmanagerconfigs.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_alertmanagers.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_podmonitors.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_probes.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_prometheuses.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_prometheusrules.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_servicemonitors.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_operator_crd_base_url }}/monitoring.coreos.com_thanosrulers.yaml
+      for CRD in alertmanagerconfigs alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
+        kubectl --kubeconfig=$KUBECONFIG wait --for condition=established --timeout=60s crd/${CRD}.monitoring.coreos.com
+      done
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: prometheus_operator_install_crds | bool
+
+- name: Run CRD installation script
+  ansible.builtin.command:
+    cmd: "{{ playbook_dir }}/../fetched_tokens/install_prometheus_crds.sh"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: crd_installation
+  changed_when: true
+  when: prometheus_operator_install_crds | bool
+
+# Deploy just the operator component
+- name: Install prometheus-operator chart
+  kubernetes.core.helm:
+    name: "prometheus-operator"
+    chart_ref: prometheus-community/prometheus-operator
+    release_namespace: "{{ prometheus_operator_namespace }}"
+    create_namespace: false
+    kubeconfig: "{{ kubeconfig_path }}"
+    skip_crds: true  # We already installed CRDs
+    values:
+      prometheusOperator:
+        image:
+          repository: "{{ prometheus_operator_image | regex_replace(':.*$', '') }}"
+          tag: "{{ prometheus_operator_image | regex_replace('^.*:', '') }}"
+        resources:
+          limits:
+            cpu: "{{ prometheus_operator_resources.limits.cpu }}"
+            memory: "{{ prometheus_operator_resources.limits.memory }}"
+          requests:
+            cpu: "{{ prometheus_operator_resources.requests.cpu }}"
+            memory: "{{ prometheus_operator_resources.requests.memory }}"
+        replicaCount: "{{ prometheus_operator_replicas }}"
+        podLabels:
+          app: prometheus-operator
+        serviceAccount:
+          create: true
+          name: prometheus-operator
+      admissionWebhooks:
+        enabled: "{{ prometheus_operator_enable_admission_webhook }}"
+        failurePolicy: "Ignore"  # Add this to match the successful approach
+      prometheusConfigReloader:
+        resources:
+          limits:
+            cpu: "{{ prometheus_operator_config_reloader_resources.limits.cpu | default('100m') }}"
+            memory: "{{ prometheus_operator_config_reloader_resources.limits.memory | default('50Mi') }}"
+          requests:
+            cpu: "{{ prometheus_operator_config_reloader_resources.requests.cpu | default('100m') }}"
+            memory: "{{ prometheus_operator_config_reloader_resources.requests.memory | default('50Mi') }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Wait for deployments to be ready
+- name: Wait for operator deployment to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: prometheus-operator
+    namespace: "{{ prometheus_operator_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: deployment_status
+  until:
+    - deployment_status.resources | length > 0
+    - deployment_status.resources[0].status.availableReplicas is defined
+    - deployment_status.resources[0].status.availableReplicas > 0
+  retries: 30
+  delay: 10
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+# Display completion message
+- name: Display Prometheus Operator installation summary
+  ansible.builtin.debug:
+    msg:
+      - "============================================"
+      - "Prometheus Operator has been deployed successfully"
+      - "Namespace: {{ prometheus_operator_namespace }}"
+      - "CRDs installed: {{ 'Yes' if prometheus_operator_install_crds else 'No' }}"
+      - "============================================"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false

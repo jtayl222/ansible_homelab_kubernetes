@@ -1,0 +1,6 @@
+---
+# Default variables for k8s_dashboard role
+k8s_dashboard_namespace: kubernetes-dashboard
+k8s_dashboard_release_name: kubernetes-dashboard
+k8s_dashboard_ingress_host: dashboard.k8s.local
+k8s_dashboard_ingress_class: traefik

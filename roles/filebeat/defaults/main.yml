@@ -1,0 +1,30 @@
+---
+# Filebeat configuration
+filebeat_namespace: "{{ elastic_namespace | default('elastic-system') }}"
+filebeat_version: "8.12.2"
+filebeat_elasticsearch_host: "https://elasticsearch-es-http.{{ filebeat_namespace }}.svc:9200"
+filebeat_kibana_host: "https://kibana-kb-http.{{ filebeat_namespace }}.svc:5601"
+
+# Resources configuration
+filebeat_resources:
+  requests:
+    memory: "100Mi"
+    cpu: "100m"
+  limits:
+    memory: "200Mi"
+    cpu: "200m"
+
+# Log collection configuration
+filebeat_collect_container_logs: true
+filebeat_collect_k8s_metadata: true
+filebeat_collect_system_logs: true
+filebeat_collect_node_logs: true
+
+# Elasticsearch authentication
+filebeat_elasticsearch_username: "elastic"
+filebeat_elasticsearch_password: "{{ elastic_password | default('') }}"
+
+# Advanced configuration
+filebeat_log_level: "info"
+filebeat_daemonset_name: "filebeat"
+filebeat_service_account: "filebeat"

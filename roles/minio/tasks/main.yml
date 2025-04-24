@@ -1,0 +1,380 @@
+# 1. Check prerequisites
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg:
+      Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
+      first.
+  when: not kubeconfig_stat.stat.exists
+
+  # 2. Check for previous installation
+- name: Check if MinIO is already installed
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get namespace {{ minio_namespace }} -o name 2>/dev/null || echo "not found"
+  register: minio_ns_check
+  become: false
+  changed_when: false
+
+- name: Display MinIO installation status
+  ansible.builtin.debug:
+    msg:
+      "MinIO namespace: {{ 'Already exists' if 'not found' not in minio_ns_check.stdout
+      else 'Will be created' }}"
+
+  # 3. Create namespace if needed
+- name: Create MinIO namespace if it doesn't exist
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ minio_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: "'not found' in minio_ns_check.stdout"
+
+  # Add this task after the namespace is created but before creating IngressRoutes
+- name: Create MinIO strip-prefix middleware
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: minio-strip-prefix
+        namespace: minio
+      spec:
+        stripPrefix:
+          prefixes:
+            - /minio
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # 4. Add Bitnami Helm repository
+- name: Add Bitnami Helm repository
+  kubernetes.core.helm_repository:
+    name: "{{ minio_chart_repo }}"
+    repo_url: https://charts.bitnami.com/bitnami
+  become: false
+
+  # 5. Deploy MinIO using Helm
+- name: Deploy MinIO using Helm
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    release_name: minio
+    chart_ref: "{{ minio_chart_repo }}/{{ minio_chart_name }}"
+    release_namespace: "{{ minio_namespace }}"
+    chart_version: "{{ minio_chart_version }}"
+    values:
+      mode: standalone
+      auth:
+        rootUser: "{{ minio_access_key }}"
+        rootPassword: "{{ minio_secret_key }}"
+      persistence:
+        enabled: true
+        storageClass: nfs-client
+        size: "{{ minio_storage_size }}"
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 250m
+        limits:
+          memory: 1Gi
+          cpu: 500m
+      service:
+        type: ClusterIP
+      ingress:
+        enabled: false # We'll create our own Traefik IngressRoute
+      metrics:
+        serviceMonitor:
+          enabled: true # Enable Prometheus monitoring
+      tls:
+        enabled: false # We'll handle TLS through Traefik if needed
+      image:
+        tag: "{{ minio_app_version }}"
+  become: false
+  register: minio_deploy
+
+  # 6. Create NodePort service for MinIO API
+- name: Create NodePort service for MinIO API
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: minio-nodeport
+        namespace: "{{ minio_namespace }}"
+      spec:
+        type: NodePort
+        ports:
+          - port: 9000
+            targetPort: 9000
+            nodePort: "{{ minio_nodeport }}"
+            protocol: TCP
+            name: http
+        selector:
+          app.kubernetes.io/name: minio
+          app.kubernetes.io/instance: minio
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # 7. Create NodePort service for MinIO Console
+- name: Create NodePort service for MinIO Console
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: minio-console-nodeport
+        namespace: "{{ minio_namespace }}"
+      spec:
+        type: NodePort
+        ports:
+          - port: 9001
+            targetPort: 9001
+            nodePort: "{{ minio_console_nodeport }}"
+            protocol: TCP
+            name: http
+        selector:
+          app.kubernetes.io/name: minio
+          app.kubernetes.io/instance: minio
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # 8. Create Traefik IngressRoute for MinIO API
+- name: Create Traefik IngressRoute for MinIO API
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio-api-ingress
+        namespace: "{{ minio_namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: Host(`{{ minio_host }}`)
+            kind: Rule
+            services:
+              - name: minio
+                port: 9000
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # 9. Create Traefik IngressRoute for MinIO Console
+- name: Create Traefik IngressRoute for MinIO Console
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio-console-ingress
+        namespace: "{{ minio_namespace }}"
+      spec:
+        entryPoints:
+          - web
+          - websecure
+        routes:
+          - match: Host(`{{ minio_console_host }}`)
+            kind: Rule
+            services:
+              - name: minio
+                port: 9001
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # Update MinIO routing with proper console service and port
+- name: Create MinIO Console route
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: minio-console-route
+        namespace: minio
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: Host(`minio.local`) || Host(`minio.{{ control_plane_ip }}.nip.io`)
+            kind: Rule
+            services:
+              - name: minio
+                port: 9001
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # 10. Wait for MinIO to be ready
+- name: Wait for MinIO deployment to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ minio_namespace }} rollout status deployment minio --timeout=180s
+  register: minio_rollout
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+  # 11. Wait a bit for MinIO to be fully initialized
+- name: Wait for MinIO to be fully initialized
+  ansible.builtin.pause:
+    seconds: 30
+  when: minio_rollout.rc == 0
+
+  # 12. Create a test bucket
+- name: Install mc (MinIO Client) for verification
+  ansible.builtin.shell: |
+    if ! command -v /tmp/mc &> /dev/null; then
+      curl -Lo /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+      chmod +x /tmp/mc
+    fi
+  become: false
+  changed_when: false
+
+- name: Configure MinIO client for testing
+  ansible.builtin.shell: |
+    # We need to wait a bit for MinIO to be fully ready for client connections
+    sleep 15
+    # Configure the client with alias
+    /tmp/mc alias set myminio http://{{ control_plane_ip }}:{{ minio_nodeport }} {{ minio_access_key }} {{ minio_secret_key }}
+    # Try to make the bucket, retry a few times if needed
+    for i in {1..5}; do
+      /tmp/mc mb --ignore-existing myminio/test-bucket && break
+      echo "Attempt $i failed, retrying..."
+      sleep 10
+    done
+  register: test_bucket
+  become: false
+  changed_when: test_bucket.rc == 0
+  ignore_errors: true
+
+  # 13. Test upload to the bucket
+- name: Test upload to the bucket
+  ansible.builtin.shell: |
+    echo "Hello from MinIO" > /tmp/test-file.txt
+    /tmp/mc cp /tmp/test-file.txt myminio/test-bucket/
+    /tmp/mc ls myminio/test-bucket/
+  register: test_upload
+  become: false
+  changed_when: false
+  ignore_errors: true
+  when: test_bucket.rc == 0
+
+  # 14. Test MinIO API access
+- name: Test MinIO API access
+  ansible.builtin.uri:
+    url: "http://{{ control_plane_ip }}:{{ minio_nodeport }}/minio/health/live"
+    method: GET
+    follow_redirects: yes
+    timeout: 10
+    return_content: no
+  register: api_access
+  become: false
+  failed_when: false  # Don't fail if the request fails
+
+  # 15. Test MinIO Console access
+- name: Test MinIO Console access
+  ansible.builtin.uri:
+    url: "http://{{ control_plane_ip }}:{{ minio_console_nodeport }}/"
+    method: GET
+    follow_redirects: yes
+    timeout: 10
+    return_content: no
+  register: console_access
+  become: false
+  failed_when: false  # Don't fail if the request fails
+
+  # 16. Display installation summary
+- name: Display MinIO installation summary
+  ansible.builtin.debug:
+    msg:
+      - ==================== MINIO INSTALLATION SUMMARY ====================
+      - MinIO has been installed successfully.
+      - ""
+      - "Version Information:"
+      - "- Chart Name: {{ minio_chart_repo }}/{{ minio_chart_name }}"
+      - "- Chart Version: {{ minio_chart_version }}"
+      - "- App Version: {{ minio_app_version }}"
+      - ""
+      - "Access URLs:"
+      - "- MinIO API (S3) via NodePort: http://{{ control_plane_ip }}:{{ minio_nodeport
+        }}/"
+      - "- MinIO API (S3) via Ingress: http://{{ minio_host }}/"
+      - "- MinIO Console via NodePort: http://{{ control_plane_ip }}:{{ minio_console_nodeport
+        }}/"
+      - "- MinIO Console via Ingress: http://{{ minio_console_host }}/"
+      - ""
+      - "Credentials:"
+      - "- Access Key: {{ minio_access_key }}"
+      - "- Secret Key: {{ minio_secret_key }}"
+      - ""
+      - "Deployment Status:"
+      - "- Deployment Rollout: {{ 'Successful' if minio_rollout.rc == 0 else 'Failed
+        - check logs' }}"
+      - "- Test Bucket Creation: {{ 'Successful' if test_bucket.rc == 0 else 'Failed
+        - check output' }}"
+      - "- Test Upload: {{ 'Successful' if test_upload.rc == 0 else 'Failed or skipped'
+        }}"
+      - >-
+        - API Access: {{ 'Accessible (HTTP ' + (api_access.status | default(0)) | string + ')'
+        if api_access is successful
+        else 'Not accessible' }}
+      - >-
+        - Console Access: {{ 'Accessible (HTTP ' + (console_access.status | default(0)) | string + ')'
+        if console_access is successful
+        else 'Not accessible' }}
+      - ""
+      - "Storage Configuration:"
+      - "- Storage Size: {{ minio_storage_size }}"
+      - "- Storage Class: nfs-client"
+      - ""
+      - "Next Steps:"
+      - 1. Access the MinIO Console to manage buckets and data
+      - 2. Configure applications to use MinIO with the S3 API
+      - 3. For CLI usage, use the MinIO Client (mc)
+      - ""
+      - "Verify installation with: ansible-playbook -i inventory/hosts verify_140_minio.yml"
+      - ==================================================================
+
+  # 17. Display client configuration help
+- name: Display client configuration help
+  ansible.builtin.debug:
+    msg:
+      - ==================== MINIO CLIENT CONFIGURATION ====================
+      - "To use MinIO from applications, configure S3 clients with:"
+      - ""
+      - "EndpointURL: http://{{ minio_host }}/ or http://{{ control_plane_ip }}:{{
+        minio_nodeport }}/"
+      - "Access Key: {{ minio_access_key }}"
+      - "Secret Key: {{ minio_secret_key }}"
+      - "Region: us-east-1 (default)"
+      - "Force Path Style: true"
+      - "SSL Verification: false (if using http)"
+      - ""
+      - "Example for AWS CLI:"
+      - aws --endpoint-url http://{{ control_plane_ip }}:{{ minio_nodeport }}/ --no-verify-ssl
+        s3 ls
+      - ""
+      - "Example for MinIO Client (mc):"
+      - mc alias set myminio http://{{ control_plane_ip }}:{{ minio_nodeport }} {{
+        minio_access_key }} {{ minio_secret_key }}
+      - mc ls myminio/
+      - ==================================================================

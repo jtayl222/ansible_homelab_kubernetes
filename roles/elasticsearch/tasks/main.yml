@@ -1,0 +1,283 @@
+- name: Deploy Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: elasticsearch.k8s.elastic.co/v1
+      kind: Elasticsearch
+      metadata:
+        name: elasticsearch
+        namespace: "{{ elastic_namespace }}"
+      spec:
+        version: "{{ elasticsearch_version }}"
+        nodeSets:
+          - name: default
+            count: "{{ elasticsearch_node_count }}"
+            config:
+              node.store.allow_mmap: false
+            podTemplate:
+              spec:
+                containers:
+                  - name: elasticsearch
+                    resources:
+                      requests:
+                        memory: 2Gi
+                        cpu: 0.5
+                      limits:
+                        memory: 4Gi
+                        cpu: 2
+            volumeClaimTemplates:
+              - metadata:
+                  name: elasticsearch-data
+                spec:
+                  accessModes:
+                    - ReadWriteOnce
+                  resources:
+                    requests:
+                      storage: 10Gi
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Wait for Elasticsearch to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      get elasticsearch elasticsearch -o jsonpath='{.status.health}' 2>/dev/null || echo "Waiting"
+  register: es_health
+  retries: 50
+  delay: 15
+  until: es_health.stdout == "green"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false
+
+- name: Create NodePort service for Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: elasticsearch-es-nodeport
+        namespace: "{{ elastic_namespace }}"
+      spec:
+        selector:
+          elasticsearch.k8s.elastic.co/cluster-name: elasticsearch
+          elasticsearch.k8s.elastic.co/node-master: "true"
+        ports:
+          - name: https
+            port: 9200
+            targetPort: 9200
+            nodePort: 30092
+        type: NodePort
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Get elastic user password
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      get secret elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
+  args:
+    executable: /bin/bash
+  register: elastic_password
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false
+  no_log: true
+
+- name: Wait for ES pod for exec commands
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      get pods -l elasticsearch.k8s.elastic.co/cluster-name=elasticsearch \
+      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo ""
+  register: es_pod_name
+  until: es_pod_name.stdout != ""
+  retries: 10
+  delay: 5
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false  # This command doesn't change anything, it just retrieves info
+
+- name: Store kibana_system password in a secret
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: kibana-credentials
+        namespace: "{{ elastic_namespace }}"
+      type: Opaque
+      stringData:
+        kibana-password: "{{ kibana_password }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Verify kibana_system role exists
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      exec {{ es_pod_name.stdout }} -- \
+        curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+          "https://localhost:9200/_security/role/kibana_system" || echo "Role not found"
+  register: kibana_role_check
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false  # This is just a check, it doesn't change anything
+  ignore_errors: true
+
+- name: Create kibana_system role if missing
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      exec {{ es_pod_name.stdout }} -- \
+      curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+      -X POST "https://localhost:9200/_security/role/kibana_system" -H "Content-Type: application/json" -d '{
+      "cluster": ["monitor", "manage_index_templates", "manage_ilm", "manage", "manage_own_api_key"],
+      "indices": [
+        {
+          "names": [ ".kibana*", ".reporting*", ".apm-agent-configuration", ".apm-custom-link", ".fleet*" ],
+          "privileges": ["all"]
+        },
+        {
+          "names": [ "kibana_sample*" ],
+          "privileges": ["read", "view_index_metadata"]
+        }
+      ],
+      "applications": [
+        {
+          "application": "kibana-*",
+          "privileges": ["all"],
+          "resources": ["*"]
+        }
+      ],
+      "run_as": []
+    }'
+  register: kibana_role_create
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: kibana_role_create.rc == 0 and "error" not in kibana_role_create.stdout
+  when: "'kibana_system' not in kibana_role_check.stdout"
+  ignore_errors: true
+
+- name: Create kibana_system user with proper roles
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      exec {{ es_pod_name.stdout }} -- \
+      curl -s -k -u "elastic:{{ elastic_password.stdout }}" \
+        -X POST "https://localhost:9200/_security/user/kibana_system" -H "Content-Type: application/json" -d '{
+          "password": "{{ kibana_password }}",
+          "roles": ["kibana_system"],
+          "full_name": "Kibana System User",
+          "email": "kibana@localhost",
+          "metadata": {
+            "created_by": "ansible"
+        }
+    }'
+  register: kibana_user_create
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: kibana_user_create.rc == 0 and "error" not in kibana_user_create.stdout
+  ignore_errors: true
+
+- name: Test kibana_system user authentication
+  ansible.builtin.shell: |
+    set -o pipefail  # Also fixing the pipe issue
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+      exec {{ es_pod_name.stdout }} -- \
+        curl -sv -k -u "kibana_system:{{ kibana_password }}" \
+          "https://localhost:9200/_security/_authenticate" 2>&1 | grep -E 'HTTP|kibana'
+  args:
+    executable: /bin/bash
+  register: kibana_auth_test
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: false  # This is just a test/verification, it doesn't change state
+  ignore_errors: true
+
+- name: Display installation information
+  ansible.builtin.debug:
+    msg:
+      - Elasticsearch deployment has completed successfully!
+      - "--------------------------------------"
+      - "Elasticsearch is available at: https://{{ hostvars['NUC8i5BEHS']['ansible_host']
+        | default('192.168.1.85') }}:30092"
+      - "Username: elastic"
+      - "Password: {{ elastic_password.stdout }}"
+      - "--------------------------------------"
+      - "Kibana credentials created:"
+      - "Username: kibana_system"
+      - "Password: {{ kibana_password }}"
+      - "Auth test result: {{ kibana_auth_test.stdout }}"
+      - "--------------------------------------"
+      - "Note: Elasticsearch uses a self-signed certificate."
+      - You may need to accept security warnings in your browser.
+
+- name: Create Elasticsearch strip-prefix middleware
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: elasticsearch-strip-prefix
+        namespace: "{{ elastic_namespace }}"
+      spec:
+        stripPrefix:
+          prefixes:
+            - /elasticsearch
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: elasticsearch_direct_access | default(false) | bool
+
+- name: Create Elasticsearch IngressRoute
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: elasticsearch-consolidated
+        namespace: "{{ elastic_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: PathPrefix(`/elasticsearch`)
+            kind: Rule
+            middlewares:
+              - name: elasticsearch-strip-prefix
+            services:
+              - name: elasticsearch-es-http
+                port: 9200
+                scheme: https
+                serversTransport: insecure-transport
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: elasticsearch_direct_access | default(false) | bool
+
+- name: Create direct access NodePort service for Elasticsearch
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: elasticsearch-direct
+        namespace: "{{ elastic_namespace }}"
+      spec:
+        type: NodePort
+        ports:
+          - port: 9200
+            targetPort: 9200
+            nodePort: 30092
+            protocol: TCP
+            name: https
+        selector:
+          common.k8s.elastic.co/type: elasticsearch
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  when: elasticsearch_direct_access | default(false) | bool

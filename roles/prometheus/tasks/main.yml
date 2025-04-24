@@ -1,0 +1,302 @@
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+  delegate_to: "{{ groups['ansible_controller'][0] }}"  # Add this line to check on U850 instead of NUC8i5BEHS
+  become: false  # Add this to prevent permission issues
+
+# - name: Check if kube-state-metrics config exists
+#   ansible.builtin.stat:
+#     path: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+#   register: kube_state_metrics_config_file
+#   delegate_to: "{{ groups['ansible_controller'][0] }}"
+#   become: false
+
+# - name: Load kube-state-metrics scrape config if available
+#   ansible.builtin.include_vars:
+#     file: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+#     name: kube_state_metrics_scrape_config
+#   when: kube_state_metrics_config_file.stat.exists
+#   delegate_to: "{{ groups['ansible_controller'][0] }}"
+#   become: false
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg: "Kubeconfig not found at {{ kubeconfig_path }}. Please run the kubeconfig tasks first."
+  when: not kubeconfig_stat.stat.exists
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
+- name: Add Prometheus Helm repository
+  kubernetes.core.helm_repository:
+    name: prometheus-community
+    repo_url: https://prometheus-community.github.io/helm-charts
+    kubeconfig: "{{ kubeconfig_path }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+  # Fail if Prometheus already exists
+- name: Check if Prometheus release exists
+  ansible.builtin.shell: |
+    helm --kubeconfig="{{ kubeconfig_path }}" list -n "{{ prometheus_namespace }}" --filter '{{ prometheus_release_name }}' --short
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  register: existing_prometheus
+  changed_when: false
+  failed_when: false
+
+- name: Fail if Prometheus is already installed
+  ansible.builtin.fail:
+    msg:
+      "Prometheus release {{ prometheus_release_name }} detected: remove or clean
+      up first!"
+  when: existing_prometheus.stdout | length > 0
+
+- name: Create monitoring namespace
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: "{{ prometheus_namespace }}"
+    api_version: v1
+    kind: Namespace
+    state: present
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Create Grafana and Prometheus middlewares
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: "{{ item.name }}-strip-prefix"
+        namespace: monitoring
+      spec:
+        stripPrefix:
+          prefixes:
+            - /{{ item.name }}
+  loop:
+    - name: grafana
+    - name: prometheus
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Create monitoring headers middleware
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: monitoring-headers
+        namespace: monitoring
+      spec:
+        headers:
+          customRequestHeaders:
+            X-Forwarded-Proto: http
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Create CRD installation script
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../fetched_tokens/install_crds.sh"
+    mode: "0755"
+    content: |
+      #!/bin/bash
+      set -e
+      KUBECONFIG="{{ kubeconfig_path }}"
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_alertmanagerconfigs.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_alertmanagers.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_podmonitors.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_probes.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_prometheuses.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_prometheusrules.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_servicemonitors.yaml
+      kubectl --kubeconfig=$KUBECONFIG apply --server-side=true -f {{ prometheus_crd_base_url }}/monitoring.coreos.com_thanosrulers.yaml
+      for CRD in alertmanagerconfigs alertmanagers podmonitors probes prometheuses prometheusrules servicemonitors thanosrulers; do
+        kubectl --kubeconfig=$KUBECONFIG wait --for condition=established --timeout=60s crd/${CRD}.monitoring.coreos.com
+      done
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Run CRD installation script
+  ansible.builtin.command:
+    cmd: "{{ playbook_dir }}/../fetched_tokens/install_crds.sh"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: crd_installation
+  changed_when: true
+
+- name: Install kube-prometheus-stack
+  kubernetes.core.helm:
+    name: "{{ prometheus_release_name }}"
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: "{{ prometheus_namespace }}"
+    create_namespace: false
+    kubeconfig: "{{ kubeconfig_path }}"
+    skip_crds: true
+    values:
+      grafana:
+        service:
+          type: ClusterIP
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          path: /grafana
+          pathType: Prefix
+        grafana.ini:
+          server:
+            domain: "{{ control_plane_ip }}"
+            root_url: "%(protocol)s://%(domain)s:%(http_port)s/grafana"
+            serve_from_sub_path: true
+      prometheusOperator:
+        admissionWebhooks:
+          failurePolicy: Ignore
+      prometheus:
+        prometheusSpec:
+          serviceMonitorSelectorNilUsesHelmValues: false
+          podMonitorSelectorNilUsesHelmValues: false
+      alertmanager:
+        ingress:
+          enabled: true
+          ingressClassName: traefik
+          path: /alertmanager
+          pathType: Prefix
+      kubeControllerManager:
+        enabled: false
+      kubeScheduler:
+        enabled: false
+      kubeProxy:
+        enabled: false
+      kubeEtcd:
+        enabled: false
+      nodeExporter:
+        enabled: true
+      kubelet:
+        serviceMonitor:
+          namespace: "{{ prometheus_namespace }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: prometheus_installation
+
+- name: Create consolidated Grafana IngressRoute
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: grafana-consolidated
+        namespace: monitoring
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: Host(`grafana.local`) || Host(`grafana.{{ control_plane_ip }}.nip.io`)
+            kind: Rule
+            services:
+              - name: prometheus-grafana
+                port: 80
+            middlewares:
+              - name: monitoring-headers
+          - match: PathPrefix(`/grafana`)
+            kind: Rule
+            services:
+              - name: prometheus-grafana
+                port: 80
+            middlewares:
+              - name: grafana-strip-prefix
+              - name: monitoring-headers
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Update Grafana configuration via Helm values
+  kubernetes.core.helm:
+    name: "{{ prometheus_release_name }}"
+    chart_ref: prometheus-community/kube-prometheus-stack
+    release_namespace: "{{ prometheus_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+    reuse_values: true
+    values:
+      grafana:
+        grafana.ini:
+          server:
+            domain: grafana.{{ control_plane_ip }}.nip.io
+            root_url: "%(protocol)s://%(domain)s"
+            serve_from_sub_path: true
+      alertmanager:
+        config:
+          route:
+            receiver: "null"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Restart Grafana pods to apply configuration
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" rollout restart deployment {{ prometheus_release_name }}-grafana -n {{ prometheus_namespace }}
+  register: restart_result
+  changed_when: restart_result.rc == 0  # This will mark the task as changed when the command succeeds
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Wait for deployments to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    name: "{{ item }}"
+    namespace: "{{ prometheus_namespace }}"
+    kubeconfig: "{{ kubeconfig_path }}"
+  register: deployment_status
+  until:
+    - deployment_status.resources | length > 0
+    - deployment_status.resources[0].status.availableReplicas is defined
+    - deployment_status.resources[0].status.availableReplicas > 0
+  retries: 30
+  delay: 10
+  loop:
+    - prometheus-grafana
+    - prometheus-kube-prometheus-operator
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Get Traefik NodePort information
+  ansible.builtin.shell: |
+    kubectl --kubeconfig="{{ kubeconfig_path }}" \
+      get svc traefik -n {{ traefik_namespace }} \
+        -o jsonpath='{.spec.ports[?(@.name=="web")].nodePort}'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: traefik_nodeport
+  changed_when: false
+
+- name: Get Grafana admin password
+  ansible.builtin.shell: |
+    set -o pipefail
+    kubectl --kubeconfig="{{ kubeconfig_path }}" \
+      get secret -n {{ prometheus_namespace }} "{{ prometheus_release_name }}-grafana" \
+      -o jsonpath="{.data.admin-password}" | base64 --decode
+  args:
+    executable: /bin/bash
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  register: grafana_password
+  changed_when: false
+  no_log: true
+
+- name: Display installation information
+  ansible.builtin.debug:
+    msg:
+      - =====================================================================
+      - " Prometheus and Grafana Stack Installed "
+      - =====================================================================
+      - ""
+      - "Grafana URLs:"
+      - "  - Domain access: http://grafana.{{ control_plane_ip }}.nip.io"
+      - "  - HTTPS access: https://grafana.{{ control_plane_ip }}.nip.io"
+      - "  - Direct access: http://{{ control_plane_ip }}:{{ traefik_nodeport.stdout }}/grafana"
+      - "Grafana username: admin"
+      - "Grafana password: {{ grafana_password.stdout }}"
+      - ""
+      - "Prometheus URL: http://{{ control_plane_ip }}:{{ traefik_nodeport.stdout }}/prometheus"
+      - "Alertmanager URL: http://{{ control_plane_ip }}:{{ traefik_nodeport.stdout }}/alertmanager"
+      - =====================================================================

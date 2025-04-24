@@ -1,0 +1,33 @@
+## MinIO helm chart values
+
+mode: standalone  # or distributed
+
+persistence:
+  enabled: true
+  storageClass: "{{ minio_storage_class }}"
+  size: {{ minio_storage_size }}
+
+replicas: {{ minio_replica_count }}
+
+resources:
+  requests:
+    memory: 1Gi
+    cpu: 250m
+
+service:
+  type: {{ minio_service_type }}
+
+ingress:
+  enabled: {{ minio_ingress_enabled | lower }}
+  ingressClassName: {{ k8s_dashboard_ingress_class | default('traefik') }}
+  hosts:
+    - {{ minio_ingress_host }}
+  
+consoleIngress:
+  enabled: {{ minio_ingress_enabled | lower }}
+  ingressClassName: {{ k8s_dashboard_ingress_class | default('traefik') }}
+  hosts:
+    - {{ minio_console_ingress_host }}
+
+rootUser: "{{ minio_root_user }}"
+rootPassword: "{{ minio_root_password }}"

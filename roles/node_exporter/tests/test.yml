@@ -1,0 +1,6 @@
+---
+- name: Test node_exporter role
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - node_exporter

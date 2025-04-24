@@ -1,0 +1,58 @@
+- name: Cleanup Kibana
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
+    elastic_namespace: elastic
+
+  tasks:
+    - name: Display cleanup information
+      ansible.builtin.debug:
+        msg: Starting cleanup of Kibana components from the cluster...
+
+      # Remove Kibana resources
+    - name: Remove Kibana
+      kubernetes.core.k8s:
+        kubeconfig: "{{ kubeconfig_path }}"
+        state: absent
+        definition:
+          apiVersion: kibana.k8s.elastic.co/v1
+          kind: Kibana
+          metadata:
+            name: kibana
+            namespace: "{{ elastic_namespace }}"
+      register: kibana_removal
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
+      become: false
+      failed_when:
+        - kibana_removal.failed is defined
+        - kibana_removal.failed
+        - not (
+            kibana_removal.msg | default('') is search('not found') or
+            kibana_removal.msg | default('') is search('NotFound') or
+            kibana_removal.msg | default('') is search('does not exist')
+          )
+
+    - name: Wait for Kibana to be deleted
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
+          get kibana 2>&1 | grep -c "No resources found" || true
+      register: kibana_deleted
+      until: kibana_deleted.stdout | int > 0 or kibana_deleted.rc != 0
+      retries: 10
+      delay: 10
+      delegate_to: "{{ groups['ansible_controller'][0] }}"
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display cleanup completion message
+      ansible.builtin.debug:
+        msg:
+          - Kibana cleanup has completed.
+          - "--------------------------------------"
+          - "The following components have been removed:"
+          - "- Kibana instances"
+          - "--------------------------------------"
+          - "You can verify removal with:"
+          - kubectl get kibana -n {{ elastic_namespace }}

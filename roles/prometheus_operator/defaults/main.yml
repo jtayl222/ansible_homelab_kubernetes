@@ -1,0 +1,55 @@
+---
+# Prometheus Operator Configuration
+prometheus_operator_namespace: monitoring
+prometheus_operator_version: v0.71.2
+prometheus_operator_crd_base_url: "https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd"
+prometheus_operator_crds:
+  - alertmanagerconfigs
+  - alertmanagers
+  - podmonitors
+  - probes
+  - prometheuses
+  - prometheusrules
+  - servicemonitors
+  - thanosrulers
+
+# Deployment configuration
+prometheus_operator_replicas: 1
+prometheus_operator_image: quay.io/prometheus-operator/prometheus-operator:v0.71.2
+prometheus_operator_resources:
+  requests:
+    memory: 100Mi
+    cpu: 100m
+  limits:
+    memory: 200Mi
+    cpu: 200m
+
+# Config reloader resources
+prometheus_operator_config_reloader_resources:
+  requests:
+    memory: 50Mi
+    cpu: 100m
+  limits:
+    memory: 50Mi
+    cpu: 100m
+
+# Configuration options
+prometheus_operator_manage_crds: true  # Set to false if you want to manage CRDs separately
+prometheus_operator_create_namespace: true
+
+# CRDs to install
+prometheus_operator_install_crds: true
+prometheus_operator_crd_urls:
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_alertmanagerconfigs.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_alertmanagers.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_podmonitors.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_probes.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_prometheuses.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_prometheusrules.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_servicemonitors.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_thanosrulers.yaml
+  - https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/v0.71.2/example/prometheus-operator-crd/monitoring.coreos.com_scrapeconfigs.yaml
+
+# Admission webhook settings
+prometheus_operator_enable_admission_webhook: false
+prometheus_operator_admission_webhook_port: 8443

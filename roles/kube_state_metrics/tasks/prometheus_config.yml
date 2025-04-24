@@ -1,0 +1,42 @@
+---
+# This file can be included by your prometheus role
+- name: Ensure generated directory exists
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../generated"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Generate kube-state-metrics scrape config for Prometheus
+  ansible.builtin.template:
+    src: prometheus-scrape-config.yml.j2
+    dest: "{{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+    mode: '0644'
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Display Prometheus configuration notice
+  ansible.builtin.debug:
+    msg:
+      - "IMPORTANT: To scrape metrics from kube-state-metrics, you need to include the"
+      - "configuration from {{ playbook_dir }}/../generated/prometheus-ksm-scrape-config.yml"
+      - "in your Prometheus scrape_configs."
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+
+- name: Add kube-state-metrics scrape config to Prometheus
+  ansible.builtin.set_fact:
+    prometheus_scrape_configs: >
+      {{ prometheus_scrape_configs | default([]) + [{
+        'job_name': 'kube-state-metrics',
+        'kubernetes_sd_configs': [{
+          'role': 'service',
+          'namespaces': { 'names': [kube_state_metrics_namespace] }
+        }],
+        'relabel_configs': [{
+          'source_labels': ['__meta_kubernetes_service_name'],
+          'regex': 'kube-state-metrics',
+          'action': 'keep'
+        }]
+      }] }}

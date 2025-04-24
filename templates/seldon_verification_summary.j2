@@ -35,8 +35,8 @@ MinIO Secret: {% if minio_secret_check.rc == 0 and 'not found' not in minio_secr
 
 RESOURCES:
 ---------
-Examples directory: {% if examples_dir.stat.exists %}✓ Available at {{ playbook_dir }}/seldon-examples{% else %}❌ Not available{% endif %}
-Test script: {% if test_script.stat.exists %}✓ Available at {{ playbook_dir }}/seldon-examples/test-iris-model.sh{% else %}❌ Not available{% endif %}
+Examples directory: {% if examples_dir.stat.exists %}✓ Available at {{ playbook_dir }}/../seldon-examples{% else %}❌ Not available{% endif %}
+Test script: {% if test_script.stat.exists %}✓ Available at {{ playbook_dir }}/../seldon-examples/test-iris-model.sh{% else %}❌ Not available{% endif %}
 
 ACCESS INFO:
 -----------

@@ -1,0 +1,625 @@
+# SECTION 1: PREREQUISITES
+- name: Ensure kubeconfig exists
+  ansible.builtin.stat:
+    path: "{{ kubeconfig_path }}"
+  register: kubeconfig_stat
+
+- name: Fail if kubeconfig doesn't exist
+  ansible.builtin.fail:
+    msg:
+      Kubeconfig not found at {{ kubeconfig_path }}. Please run install_020_k3s_control_plane.yml
+      first.
+  when: not kubeconfig_stat.stat.exists
+
+- name: Check if MinIO is installed
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get namespace {{ minio_namespace }} -o name 2>/dev/null || echo "not found"
+  register: minio_ns_check
+  become: false
+  changed_when: false
+
+- name: Display MinIO installation status
+  ansible.builtin.debug:
+    msg:
+      "MinIO namespace: {{ 'Available' if 'not found' not in minio_ns_check.stdout
+      else 'Not found - model storage will not be configured' }}"
+
+- name: Check if Seldon is already installed
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get namespace {{ seldon_namespace }} -o name 2>/dev/null || echo "not found"
+  register: seldon_ns_check
+  become: false
+  changed_when: false
+
+- name: Display Seldon installation status
+  ansible.builtin.debug:
+    msg:
+      "Seldon namespace: {{ 'Already exists' if 'not found' not in seldon_ns_check.stdout
+      else 'Will be created' }}"
+
+# Check if Seldon CRDs are installed correctly - MOVED UP HERE
+- name: Check if Seldon CRDs are installed correctly
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get crd seldondeployments.machinelearning.seldon.io -o name 2>/dev/null || echo "not found"
+  register: seldon_crd_check
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+# Only try to wait for the CRD if we've already installed Seldon Core
+- name: Wait for Seldon CRDs to be fully established
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} wait --for=condition=established crd seldondeployments.machinelearning.seldon.io --timeout=60s
+  register: seldon_crd_ready
+  become: false
+  changed_when: false
+  ignore_errors: true
+  retries: 5
+  delay: 10
+  when:
+    - seldon_deploy is defined
+    - seldon_deploy.changed
+  until: seldon_crd_ready is succeeded
+
+- name: Wait for Seldon CRDs to be fully established (additional check)
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get crd seldondeployments.machinelearning.seldon.io
+    echo "Waiting for CRD to be fully established..."
+    sleep 10  # Give the controller time to fully initialize
+  register: additional_crd_wait
+  become: false
+  changed_when: false
+  ignore_errors: true
+  when:
+    seldon_crd_check is defined and seldon_crd_check.stdout is defined and 'not
+    found' not in seldon_crd_check.stdout
+
+# SECTION 2: SETUP AND INSTALLATION
+- name: Create Seldon namespace if it doesn't exist
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Namespace
+      metadata:
+        name: "{{ seldon_namespace }}"
+  become: false
+  when: "'not found' in seldon_ns_check.stdout"
+
+- name: Create seldon-examples directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../seldon-examples"
+    state: directory
+    mode: "0755"
+  become: false
+
+- name: Create example Iris model deployment manifest
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../seldon-examples/iris-model.yaml"
+    content: |
+      apiVersion: machinelearning.seldon.io/v1
+      kind: SeldonDeployment
+      metadata:
+        name: iris-model
+        namespace: {{ seldon_namespace }}
+      spec:
+        predictors:
+        - graph:
+            children: []
+            implementation: SKLEARN_SERVER
+            modelUri: gs://seldon-models/v1.11.0-dev/sklearn/iris
+            name: classifier
+          name: default
+          replicas: 1
+          componentSpecs:
+          - spec:
+              containers:
+              - name: classifier
+                env:
+                - name: LOG_LEVEL
+                  value: "INFO"  # Enable debug logging
+    mode: "0644"
+  become: false
+
+- name: Add Seldon Core Helm repository
+  kubernetes.core.helm_repository:
+    name: "{{ seldon_chart_repo }}"
+    repo_url: https://storage.googleapis.com/seldon-charts
+  become: false
+
+- name: Check if Istio is installed
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} \
+      get namespace istio-system -o name 2>/dev/null || echo "not found"
+  register: istio_ns_check
+  become: false
+  changed_when: false
+
+- name: Display Istio installation status
+  ansible.builtin.debug:
+    msg:
+      "Istio namespace: {{ 'Available' if 'not found' not in istio_ns_check.stdout
+      else 'Not found - configuring alternative ingress' }}"
+
+- name: Create MinIO credentials secret for Seldon if MinIO is available
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ seldon_minio_secret_name }}"
+        namespace: "{{ seldon_namespace }}"
+      type: Opaque
+      stringData:
+        AWS_ACCESS_KEY_ID: "{{ minio_access_key }}"
+        AWS_SECRET_ACCESS_KEY: "{{ minio_secret_key }}"
+        AWS_ENDPOINT_URL: "{{ minio_endpoint }}"
+        USE_SSL: "false"
+  become: false
+  when: "'not found' not in minio_ns_check.stdout"
+
+- name: Deploy Seldon Core using Helm
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    release_name: seldon-core
+    chart_ref: "{{ seldon_chart_repo }}/{{ seldon_chart_name }}"
+    release_namespace: "{{ seldon_namespace }}"
+    chart_version: "{{ seldon_chart_version }}"
+    values:
+      usageMetrics:
+        enabled: false
+      istio:
+        enabled: false
+      ambassador:
+        enabled: false
+      ingress:
+        enabled: true
+      defaultUserID: "1000"
+      executor:
+        image:
+          pullPolicy: IfNotPresent
+        resources:
+          requests:
+            cpu: 100m
+            memory: 250Mi
+          limits:
+            cpu: 500m
+            memory: 500Mi
+      predictor_servers:
+        TENSORFLOW_SERVER:
+          protocols:
+            tensorflow:
+              defaultImageVersion: 2.6.2
+        SKLEARN_SERVER:
+          protocols:
+            seldon:
+              defaultImageVersion: 1.11.2
+        XGBOOST_SERVER:
+          protocols:
+            seldon:
+              defaultImageVersion: 1.11.2
+        MLFLOW_SERVER:
+          protocols:
+            seldon:
+              defaultImageVersion: 1.15.0
+      storageInitializer:
+        enabled: "{{ 'not found' not in minio_ns_check.stdout }}"
+        image: seldonio/rclone-storage-initializer:1.16.0
+        envSecretRefName: "{{ seldon_minio_secret_name }}"
+      certManager:
+        enabled: false
+  become: false
+  register: seldon_deploy
+
+- name: Wait for Seldon Core operator to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} rollout status deployment seldon-controller-manager --timeout=180s
+  register: seldon_operator_rollout
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Create a model storage bucket in MinIO if available
+  ansible.builtin.shell: |
+    if command -v /tmp/mc &> /dev/null; then
+      /tmp/mc alias set modelstorage {{ minio_endpoint }} {{ minio_access_key }} {{ minio_secret_key }}
+      /tmp/mc mb --ignore-existing modelstorage/seldon-models
+    else
+      curl -Lo /tmp/mc https://dl.min.io/client/mc/release/linux-amd64/mc
+      chmod +x /tmp/mc
+      /tmp/mc alias set modelstorage {{ minio_endpoint }} {{ minio_access_key }} {{ minio_secret_key }}
+      /tmp/mc mb --ignore-existing modelstorage/seldon-models
+    fi
+  register: model_bucket
+  become: false
+  changed_when: false
+  ignore_errors: true
+  when: "'not found' not in minio_ns_check.stdout"
+
+- name: Create NodePort service for Seldon API
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: seldon-nodeport
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        type: NodePort
+        ports:
+          - port: 80
+            targetPort: 9000
+            nodePort: "{{ seldon_nodeport }}"
+            protocol: TCP
+            name: http
+        selector:
+          app.kubernetes.io/instance: seldon-core
+  become: false
+
+- name: Create service for Seldon Controller Manager
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: seldon-controller-manager
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        ports:
+          - port: 8080
+            targetPort: metrics
+            protocol: TCP
+            name: http
+        selector:
+          app: seldon
+          app.kubernetes.io/name: seldon
+          control-plane: seldon-controller-manager
+    merge_type: strategic-merge
+  become: false
+
+# Create a middleware to strip /seldon/seldon-system/iris-model
+- name: Create a middleware to strip /seldon/seldon-system/iris-model
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: seldon-strip-all
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        stripPrefix:
+          prefixes:
+            - /seldon/seldon-system/iris-model
+  become: false
+
+# SECTION 5: MODEL DEPLOYMENT
+- name: Deploy example Iris model deployment
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} apply -f {{ playbook_dir }}/../seldon-examples/iris-model.yaml
+  register: example_deploy
+  become: false
+  changed_when: "'created' in example_deploy.stdout"
+  ignore_errors: true
+
+- name: Force deploy Iris model with kubectl create
+  ansible.builtin.shell: |
+    # Delete any failed deployments
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      delete seldondeployment iris-model --ignore-not-found
+
+    # Create a temporary simplified version
+    cat > /tmp/simple-iris-model.yaml << EOF
+    apiVersion: machinelearning.seldon.io/v1
+    kind: SeldonDeployment
+    metadata:
+      name: iris-model
+      namespace: {{ seldon_namespace }}
+    spec:
+      predictors:
+      - graph:
+          children: []
+          implementation: SKLEARN_SERVER
+          modelUri: gs://seldon-models/v1.11.0-dev/sklearn/iris
+          name: classifier
+        name: default
+        replicas: 1
+    EOF
+
+    # Apply the simplified model
+    kubectl --kubeconfig={{ kubeconfig_path }} apply -f /tmp/simple-iris-model.yaml
+  register: force_deploy
+  become: false
+  changed_when: "'created' in force_deploy.stdout"
+  ignore_errors: true
+  when:
+    example_deploy is defined and example_deploy.rc is defined and example_deploy.rc
+    != 0
+
+- name: Wait for example deployment to be ready
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} rollout status deployment \
+      $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+        get deployment -l seldon-deployment-id=iris-model -o name | head -1) \
+      --timeout=180s
+  register: example_rollout
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Get Seldon model main service name (with error handling)
+  ansible.builtin.shell: |
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      get services -l seldon-app=iris-model-default -o name || echo "No services found"
+  register: seldon_model_service
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Display discovered service name
+  ansible.builtin.debug:
+    msg:
+      "Found Seldon model service: {{ seldon_model_service.stdout if seldon_model_service
+      is defined and seldon_model_service.stdout != '' else 'No service found' }}"
+
+- name: Create Seldon model IngressRoute
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: traefik.io/v1alpha1
+      kind: IngressRoute
+      metadata:
+        name: seldon-models-direct-route
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        entryPoints:
+          - web
+        routes:
+          - match: Host(`seldon.local`) && PathPrefix(`/seldon/seldon-system/iris-model`)
+            kind: Rule
+            middlewares:
+              - name: seldon-strip-all
+            services:
+              - name: iris-model-default
+                port: 8000
+            priority: 100
+  become: false
+
+- name: Create documentation deployment
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: seldon-docs
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        selector:
+          matchLabels:
+            app: seldon-docs
+        replicas: 1
+        template:
+          metadata:
+            labels:
+              app: seldon-docs
+          spec:
+            containers:
+              - name: nginx
+                image: nginx:alpine
+                ports:
+                  - containerPort: 80
+                volumeMounts:
+                  - name: doc-content
+                    mountPath: /usr/share/nginx/html/
+            volumes:
+              - name: doc-content
+                configMap:
+                  name: seldon-api-doc
+  become: false
+
+- name: Create documentation service
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: seldon-docs
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        selector:
+          app: seldon-docs
+        ports:
+          - port: 80
+  become: false
+
+- name: Wait for model pod to be ready
+  ansible.builtin.shell: |
+    echo "Waiting for model pod to be ready (this may take a few minutes)..."
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      wait --for=condition=ready pod -l seldon-deployment-id=iris-model --timeout=300s
+  register: model_pod_ready
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Check model pod details
+  ansible.builtin.shell: |
+    echo "Checking model pod details:"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      describe pods -l seldon-deployment-id=iris-model
+    echo "Checking model pod logs:"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      logs -l seldon-deployment-id=iris-model -c classifier || echo "Container not ready yet"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      logs -l seldon-deployment-id=iris-model -c seldon-container-engine || echo "Container not ready yet"
+  register: model_pod_details
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+# SECTION 8: TESTING AND ACCESS
+- name: Test Seldon API access
+  ansible.builtin.shell: |
+    echo "Testing Seldon API via NodePort..."
+    echo "Checking service details:"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      get service seldon-nodeport -o wide
+    echo "Checking pod status:"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      get pods -l seldon-deployment-id=iris-model -o wide
+    echo "Checking endpoints:"
+    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
+      get endpoints | grep iris
+  register: api_access
+  become: false
+  changed_when: false
+  ignore_errors: true
+
+- name: Create direct NodePort service for the iris model
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: iris-model-direct
+        namespace: "{{ seldon_namespace }}"
+      spec:
+        type: NodePort
+        ports:
+          - port: 80
+            targetPort: 8000 # Changed to 8000 to match the service port
+            nodePort: 30151
+            protocol: TCP
+            name: http
+        selector:
+          seldon-app: iris-model-default # This matches the correct label
+  become: false
+
+- name: Create example API call script
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../seldon-examples/test-iris-model.sh"
+    content: |
+      #!/bin/bash
+
+      # Test Seldon-deployed Iris model with sample data
+      curl \
+        -X POST "http://{{ control_plane_ip }}:30151/api/v1.0/predictions" \
+        -H "Content-Type: application/json" \
+        -d '{"data": {"ndarray": [[5.1, 3.5, 1.4, 0.2]]}}'
+    mode: "0755"
+  become: false
+
+- name: Create direct test script
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../seldon-examples/test-direct.sh"
+    content: |
+      #!/bin/bash
+
+      # Test direct access to model service (bypassing Traefik)
+      kubectl port-forward -n seldon-system svc/iris-model-default 8000:8000 &
+      PID=$!
+
+      # Wait for port-forward to establish
+      sleep 3
+
+      # Send request directly to forwarded port
+      curl \
+        -X POST http://localhost:8000/api/v1.0/predictions \
+        -H "Content-Type: application/json" \
+        -d '{"data": {"ndarray": [[5.1, 3.5, 1.4, 0.2]]}}'
+
+      # Clean up
+      kill $PID
+    mode: "0755"
+  become: false
+
+- name: Create simplified access test script
+  ansible.builtin.copy:
+    dest: "{{ playbook_dir }}/../seldon-examples/test-simple.sh"
+    content: |
+      #!/bin/bash
+
+      # Test simplified prediction endpoint through Traefik
+      curl \
+        -X POST "http://seldon.local/predict" \
+        -H "Content-Type: application/json" \
+        -d '{"data": {"ndarray": [[5.1, 3.5, 1.4, 0.2]]}}'
+    mode: "0755"
+  become: false
+
+# SECTION 9: SUMMARY
+- name: Display Seldon Core installation summary
+  ansible.builtin.debug:
+    msg:
+      - ==================== SELDON CORE INSTALLATION SUMMARY ====================
+      - Seldon Core has been installed for machine learning deployments.
+      - ""
+      - "Version Information:"
+      - "- Chart Name: {{ seldon_chart_repo }}/{{ seldon_chart_name }}"
+      - "- Chart Version: {{ seldon_chart_version }}"
+      - ""
+      - "Access URLs:"
+      - "- Seldon API via NodePort: http://{{ control_plane_ip }}:30151/api/v1.0/predictions"
+      - "- Seldon API via simplified endpoint: http://seldon.local/predict"
+      - "- API Documentation: http://seldon.local/docs"
+      - ""
+      - "Components:"
+      - "- Seldon Operator: {{ 'Deployed successfully' if seldon_operator_rollout
+        is defined and seldon_operator_rollout.rc is defined and seldon_operator_rollout.rc
+        == 0 else 'Status unknown' }}"
+      - "- CRDs: {{ 'Installed correctly' if seldon_crd_check is defined and seldon_crd_check.stdout
+        is defined and 'not found' not in seldon_crd_check.stdout else 'Not installed
+        correctly' }}"
+      - "- Storage: {{ 'Configured with MinIO' if minio_ns_check is defined and minio_ns_check.stdout
+        is defined and 'not found' not in minio_ns_check.stdout else 'Not configured'
+        }}"
+      - ""
+      - "Example Deployment:"
+      - "- Iris Model: {{ 'Deployed' if example_deploy is defined and example_deploy.rc
+        is defined and example_deploy.rc == 0 else 'Not deployed or status unknown'
+        }}"
+      - "- Model Service: {{ seldon_model_service.stdout if seldon_model_service is
+        defined and seldon_model_service.stdout is defined else 'No service found'
+        }}"
+      - ""
+      - "Testing:"
+      - "- Example test script created at: {{ playbook_dir }}/../seldon-examples/test-iris-model.sh"
+      - "- Direct port-forwarding test: {{ playbook_dir }}/../seldon-examples/test-direct.sh"
+      - "- Simplified endpoint test: {{ playbook_dir }}/../seldon-examples/test-simple.sh"
+      - ""
+      - "Model Storage:"
+      - "- S3-compatible storage: {{ 'Configured with MinIO' if minio_ns_check is
+        defined and minio_ns_check.stdout is defined and 'not found' not in minio_ns_check.stdout
+        else 'Not configured' }}"
+      - "- Bucket: {{ 'seldon-models created in MinIO' if model_bucket is defined
+        and model_bucket.rc is defined and model_bucket.rc == 0 else 'Not created
+        or not applicable' }}"
+      - ""
+      - "Next Steps:"
+      - 1. Deploy your custom ML models using SeldonDeployments
+      - 2. Use the provided example manifest as a template
+      - 3. Store your models in MinIO for the storage initializer to load them
+      - 4. Access API documentation at http://seldon.local/docs
+      - ""
+      - "Example deployment command:"
+      - "  kubectl --kubeconfig={{ kubeconfig_path }} apply -f your-model-deployment.yaml"
+      - ==================================================================

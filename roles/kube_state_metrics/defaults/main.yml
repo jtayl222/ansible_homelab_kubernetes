@@ -1,0 +1,24 @@
+---
+# Kube State Metrics Configuration
+kube_state_metrics_namespace: monitoring
+kube_state_metrics_service_account: kube-state-metrics
+kube_state_metrics_resources:
+  requests:
+    memory: 100Mi
+    cpu: 100m
+  limits:
+    memory: 200Mi
+    cpu: 200m
+
+# Deployment Configuration
+kube_state_metrics_image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.9.2
+kube_state_metrics_replicas: 1
+kube_state_metrics_port: 8080
+kube_state_metrics_telemetry_port: 8081
+
+# Scrape configuration
+kube_state_metrics_scrape_interval: 30s
+kube_state_metrics_scrape_timeout: 10s
+
+# Service Monitor (for Prometheus Operator)
+kube_state_metrics_service_monitor_enabled: true

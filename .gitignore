@@ -77,11 +77,14 @@ kubeconfig
 **/*kubeconfig*
 **/*config.yaml
 **/*.conf
-**/*.cfg
 **/*secret*
 **/*password*
 **/*credential*
 !.pre-commit-config.yaml
+!roles/fetch_kubeconfig
+!playbooks/sealed_secrets.yml
+!roles/sealed_secrets
+
 
 # Other files that should not be tracked
 */OLD/**

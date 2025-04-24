@@ -1,0 +1,6 @@
+---
+- name: Test nfs_provisioner role
+  hosts: ansible_controller
+  remote_user: user
+  roles:
+    - nfs_provisioner

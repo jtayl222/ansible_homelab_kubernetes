@@ -1,0 +1,475 @@
+# filepath: /home/user/ansible_homelab_kubernetes/verify_130_argowf.yml
+- name: Verify Argo Workflows Installation
+  hosts: utility
+  gather_facts: true
+  vars:
+    kubeconfig_path: "{{ playbook_dir }}/../fetched_tokens//k3s-kubeconfig"
+    argowf_namespace: argowf
+    control_plane_ip:
+      "{{ hostvars[groups['k3s_control_plane'][0]]['ansible_host']
+      }}"
+    argowf_host: argowf.{{ control_plane_ip }}.nip.io
+    argowf_nodeport: 30130
+
+  tasks:
+    # 1. Check if kubeconfig exists
+    - name: Ensure kubeconfig exists
+      ansible.builtin.stat:
+        path: "{{ kubeconfig_path }}"
+      register: kubeconfig_stat
+
+    - name: Fail if kubeconfig doesn't exist
+      ansible.builtin.fail:
+        msg: Kubeconfig not found at {{ kubeconfig_path }}. Cannot proceed with verification.
+      when:
+        not kubeconfig_stat.stat.exists
+
+    # 2. Check if Argo Workflows namespace exists
+    - name: Check if Argo Workflows namespace exists
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get namespace {{ argowf_namespace }} -o name 2>/dev/null || echo "not found"
+      register: argowf_namespace
+      become: false
+      changed_when: false
+
+    - name: Fail if Argo Workflows namespace doesn't exist
+      ansible.builtin.fail:
+        msg: Argo Workflows namespace not found. Please install Argo Workflows first.
+      when:
+        "'not found' in argowf_namespace.stdout"
+
+    # 3. Check Argo Workflows deployments
+    - name: Check Argo Workflows Server deployment
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get deployment argowf-server -o jsonpath='{.status.availableReplicas}'
+      register: argowf_server_replicas
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Check Argo Workflows Workflow Controller deployment
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get deployment workflow-controller -o jsonpath='{.status.availableReplicas}'
+      register: argowf_controller_replicas
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+    # 4. Check pods for errors
+    - name: Get all pods in Argo Workflows namespace
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get pods -o custom-columns=NAME:.metadata.name,STATUS:.status.phase,READY:.status.containerStatuses[0].ready
+      register: argowf_pods
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+        # 5. Get logs from pods if they're not running correctly
+    - name: Get logs from Argo Workflows Server if not running correctly
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} logs deployment/argowf-server --tail=50
+      register: argowf_server_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when:
+        argowf_server_replicas.stdout is not defined or argowf_server_replicas.stdout
+        == "0"
+
+    - name: Get logs from Workflow Controller if not running correctly
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} logs deployment/workflow-controller --tail=50
+      register: argowf_controller_logs
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when:
+        argowf_controller_replicas.stdout is not defined or argowf_controller_replicas.stdout
+        == "0"
+
+    # 6. Check for NodePort service
+    - name: Check any NodePort services for Argo Workflows
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get svc -o jsonpath="{range .items[?(@.spec.type=='NodePort')]}{.metadata.name}{' '}{end}"
+      register: nodeport_services
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get nodeport for argowf-server services
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get svc {{ item }} -o jsonpath='{.spec.ports[0].nodePort}'
+      register: nodeport_values
+      with_items: "{{ nodeport_services.stdout.split() }}"
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when:
+        nodeport_services.stdout != ""
+
+    # 7. Check IngressRoute
+    - name: Check IngressRoute
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get ingressroute argowf-ingress -o name 2>/dev/null || echo "not found"
+      register: ingress_check
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+    # 8. Check if Argo Workflows UI is accessible via NodePort
+    - name: Test Argo Workflows UI via NodePort
+      ansible.builtin.uri:
+        url: https://{{ control_plane_ip }}:{{ argowf_nodeport }}/
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
+      register: nodeport_access
+      failed_when:
+        false
+
+    # 9. Test Argo Workflows UI via Ingress
+    - name: Test Argo Workflows UI via Ingress
+      ansible.builtin.uri:
+        url: https://{{ argowf_host }}/
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
+      register: ingress_access
+      failed_when:
+        false
+
+        # 10. Check if CRDs are installed
+    - name: Check Argo Workflows CRDs
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} \
+          get crd workflows.argoproj.io workflowtemplates.argoproj.io -o name 2>/dev/null || echo "not found"
+      register: crd_check
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+    # 11. Check if example workflow template exists
+    - name: Check example workflow template
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get workflowtemplate hello-world-template -o name 2>/dev/null || echo "not found"
+      register: template_check
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+    # 12. Describe services for debugging
+    - name: Describe NodePort service
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} describe svc argowf-server-nodeport
+      register: nodeport_describe
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when:
+        nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status
+        != 200
+
+    - name: Describe Argo Workflows Server service
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} describe svc argowf-server
+      register: argowf_server_svc_describe
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when: >
+        (nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status
+        != 200) or
+        (ingress_access is defined and ingress_access.status is defined and ingress_access.status
+        != 200)
+
+    # 13. Check network access with netcat
+    - name: Check network connectivity to NodePort
+      ansible.builtin.shell: |
+        nc -zv {{ control_plane_ip }} {{ argowf_nodeport }} -w 5 2>&1 || echo "Connection failed"
+      register: netcat_check
+      become: false
+      changed_when: false
+      ignore_errors: true
+      when:
+        nodeport_access is defined and nodeport_access.status is defined and nodeport_access.status
+        != 200
+
+    # 14. Try to submit a test workflow
+    - name: Submit test workflow if CRDs are ready
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} create -f - <<EOF
+        apiVersion: argoproj.io/v1alpha1
+        kind: Workflow
+        metadata:
+          generateName: verify-
+        spec:
+          entrypoint: hello
+          templates:
+          - name: hello
+            container:
+              image: alpine:3.14
+              ansible.builtin.command: [echo, "Verification workflow submitted successfully"]
+        EOF
+      register: workflow_submit
+      become: false
+      changed_when: "'created' in workflow_submit.stdout"
+      ignore_errors: true
+      when:
+        "'not found' not in crd_check.stdout"
+
+    # 15. Get server endpoints and config
+    - name: Get Argo Workflows Server endpoints
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get endpoints argowf-server -o jsonpath='{.subsets[0].addresses[0].ip}'
+      register: argowf_server_ip
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Argo Workflows Server configuration
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get deployment argowf-server -o jsonpath='{.spec.template.spec.containers[0].args}'
+      register: argowf_server_args
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Get Argo Workflows Server environment variables
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get deployment argowf-server -o jsonpath='{.spec.template.spec.containers[0].env[*].name}'
+      register: argowf_server_env
+      become: false
+      changed_when: false
+      ignore_errors:
+        true
+
+    # Add this to check authentication configuration
+    - name: Get full Argo Workflows Server deployment config
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get deployment argowf-server -o yaml
+      register: full_server_config
+      become: false
+      changed_when: false
+      ignore_errors: true
+
+    - name: Display Argo Workflows authentication config
+      ansible.builtin.debug:
+        msg:
+          - "Argo Workflows Server Authentication Configuration:"
+          - "{{ full_server_config.stdout | regex_search('--auth-mode=[^\\s]*') | default('Auth
+            mode not explicitly set') }}"
+          - "{{ full_server_config.stdout | regex_search('--secure=[^\\s]*') | default('Secure
+            mode not explicitly set') }}"
+
+    # 16. Display verification summary with simpler template
+    - name: Display basic Argo Workflows verification summary
+      ansible.builtin.debug:
+        msg:
+          - ==================== ARGO WORKFLOWS VERIFICATION SUMMARY ====================
+          - "Status Overview:"
+          - "- Argo Workflows Namespace: {{ 'Found' if 'not found' not in argowf_namespace.stdout
+            else 'Not found' }}"
+          - "- Argo Workflows Server: {{ 'Running (' + argowf_server_replicas.stdout +
+            ' replicas)' if argowf_server_replicas.stdout is defined and argowf_server_replicas.stdout
+            != '0' else 'Not running' }}"
+          - "- Workflow Controller: {{ 'Running (' + argowf_controller_replicas.stdout
+            + ' replicas)' if argowf_controller_replicas.stdout is defined and argowf_controller_replicas.stdout
+            != '0' else 'Not running' }}"
+          - "- CRDs: {{ 'Installed' if 'not found' not in crd_check.stdout else 'Missing'
+            }}"
+          - ""
+          - "Access Verification:"
+          - "- NodePort Service: {{ 'Available' if nodeport_services is defined and nodeport_services.stdout
+            | length > 0 else 'Not found' }}"
+          - "- IngressRoute: {{ 'Available' if 'not found' not in ingress_check.stdout
+            else 'Not found' }}"
+          - "- UI via NodePort: {{ 'Accessible (HTTP ' + nodeport_access.status | string
+            + ')' if nodeport_access.status is defined and nodeport_access.status == 200
+            else 'Not accessible' }}"
+          - "- UI via Ingress: {{ 'Accessible (HTTP ' + ingress_access.status | string
+            + ')' if ingress_access.status is defined and ingress_access.status == 200
+            else 'Not accessible' }}"
+          - ""
+          - "Resource Verification:"
+          - "- Example Template: {{ 'Found' if 'not found' not in template_check.stdout
+            else 'Not found' }}"
+          - "- Test Workflow Submission: {{ 'Successful' if workflow_submit.rc == 0 else
+            'Failed or skipped' }}"
+
+    # 17. Display pods status as separate debug task
+    - name: Display Argo Workflows pod status
+      ansible.builtin.debug:
+        msg: "{{ argowf_pods.stdout }}"
+      when:
+        argowf_pods.stdout is defined
+
+    # 18. Display logs if components are not running
+    - name: Display Argo Workflows Server logs if not running
+      ansible.builtin.debug:
+        msg: "{{ argowf_server_logs.stdout_lines | default(['No logs available']) }}"
+      when:
+        (argowf_server_replicas.stdout is not defined or argowf_server_replicas.stdout
+        == "0") and argowf_server_logs is defined
+
+    - name: Display Workflow Controller logs if not running
+      ansible.builtin.debug:
+        msg:
+          "{{ argowf_controller_logs.stdout_lines | default(['No logs available'])
+          }}"
+      when:
+        (argowf_controller_replicas.stdout is not defined or argowf_controller_replicas.stdout
+        == "0") and argowf_controller_logs is defined
+
+    # 19. Display configuration details
+    - name: Display configuration details
+      ansible.builtin.debug:
+        msg:
+          - "Configuration:"
+          - "- Server Args: {{ argowf_server_args.stdout | default('Not available') }}"
+          - "- Server Environment: {{ argowf_server_env.stdout | default('Not available')
+            }}"
+          - "- Server Endpoints: {{ argowf_server_ip.stdout | default('Not available')
+            }}"
+
+    # 20. Display network connectivity info
+    - name: Display network connectivity information
+      ansible.builtin.debug:
+        msg:
+          "Network Connectivity Test: {{ netcat_check.stdout | default('Not tested')
+          }}"
+      when:
+        nodeport_access.status is defined and nodeport_access.status != 200 and
+        netcat_check is defined
+
+    # 21. Display troubleshooting tips
+    - name: Display troubleshooting tips
+      ansible.builtin.debug:
+        msg:
+          - "Troubleshooting Tips:"
+          - "- If server is running but UI not accessible, check firewall settings"
+          - "- If CRDs are missing, the controller may not have completed installation"
+          - "- Look at pod logs for detailed error messages"
+          - "- Ensure NodePort service selector matches the pod labels"
+          - "- For manual fixes, SSH into the control plane and check logs with:"
+          - "  kubectl -n {{ argowf_namespace }} logs deployment/argowf-server"
+          - "- If verification failed, try reinstalling with: ansible-playbook -i inventory/hosts
+            install_130_argowf.yml"
+
+    # 22. Check NodePort service selectors
+    - name: Get NodePort service selectors
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} \
+          get svc argowf-server-nodeport -o jsonpath='{.spec.selector}'
+      register: nodeport_selectors
+      become: false
+      changed_when:
+        false
+
+    # Add this at the end of the verification playbook
+    - name: Ask if authentication should be fixed
+      ansible.builtin.pause:
+        prompt: |
+          Would you like to patch Argo Workflows Server to use server-only authentication?
+          (yes/no)
+      register: fix_auth
+      when:
+        nodeport_access.status is defined and nodeport_access.status != 200 or ingress_access.status
+        is defined and ingress_access.status != 200
+
+    - name: Patch Argo Workflows Server authentication if requested
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} patch deployment argowf-server --type=json -p='[
+          {
+            "op": "add",
+            "path": "/spec/template/spec/containers/0/env",
+            "value": [
+              {"name": "ARGO_WORKFLOWS_SERVER_AUTH_MODE", "value": "server"},
+              {"name": "ARGO_WORKFLOWS_SERVER_SECURE", "value": "false"}
+            ]
+          }
+        ]'
+      register: fix_auth_result
+      become: false
+      changed_when: "'patched' in fix_auth_result.stdout"
+      when: fix_auth.user_input is defined and fix_auth.user_input == "yes"
+      ignore_errors: true
+
+    - name: Try alternative patch approach if first attempt failed
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} patch deployment argowf-server --type=merge -p='{
+          "spec": {
+            "template": {
+              "spec": {
+                "containers": [{
+                  "name": "argowf-server",
+                  "env": [
+                    {"name": "ARGO_WORKFLOWS_SERVER_AUTH_MODE", "value": "server"},
+                    {"name": "ARGO_WORKFLOWS_SERVER_SECURE", "value": "false"}
+                  ]
+                }]
+              }
+            }
+          }
+        }'
+      register: fix_auth_result_alt
+      become: false
+      changed_when: "'patched' in fix_auth_result_alt.stdout"
+      when:
+        fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc
+        != 0
+      ignore_errors: true
+
+    - name: Wait for patched Argo Workflows Server to restart if fixed
+      ansible.builtin.shell: |
+        kubectl --kubeconfig={{ kubeconfig_path }} -n {{ argowf_namespace }} rollout status deployment argowf-server --timeout=60s
+      register: rollout_after_fix
+      become: false
+      changed_when: false
+      when:
+        fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc
+        == 0
+      ignore_errors: true
+
+    - name: Test access again after fix
+      ansible.builtin.uri:
+        url: "{{ item }}"
+        method: GET
+        return_content: yes
+        status_code: [200, 404, 403, 401, 502]
+        validate_certs: no
+      register: access_after_fix
+      failed_when: false
+      loop:
+        - https://{{ control_plane_ip }}:{{ argowf_nodeport }}/
+        - https://{{ argowf_host }}/
+
+    - name: Display results after fix
+      ansible.builtin.debug:
+        msg: >-
+          Access after fix: {{ 'Success (HTTP ' + access_after_fix.results[0].status
+          | string + ')'
+          if access_after_fix.results[0].status is defined and access_after_fix.results[0].status
+          == 200
+          else 'Still not accessible' }}
+      when:
+        fix_auth.user_input is defined and fix_auth.user_input == "yes" and fix_auth_result.rc
+        == 0

@@ -1,0 +1,6 @@
+---
+- name: Test grafana role
+  hosts: localhost
+  gather_facts: false
+  roles:
+    - grafana

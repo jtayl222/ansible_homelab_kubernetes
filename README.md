@@ -12,6 +12,69 @@ This project aims to simplify the deployment of a K3s-based Kubernetes cluster w
 - Monitoring with Prometheus and Grafana.
 - Troubleshooting and cleanup tools for experimentation.
 
+## NOTES
+
+### get kube config
+```bash
+MY_K3S_CONTROL_PLANE=192.168.1.85
+ssh $MY_K3S_CONTROL_PLANE "sudo cat /etc/rancher/k3s/k3s.yaml"  | sed -e "s/127.0.0.1/$MY_K3S_CONTROL_PLANE/" > ~/.kube/config
+```
+
+### Events ordered by time
+```bash
+kubectl -n kube-system get events --sort-by='.lastTimestamp'
+```
+
+### Traefik
+```bash
+# Visit: http://dashboard.local/dashboard/dashboard/#/
+
+# Get the port:
+$ kubectl -n kube-system get svc traefik
+NAME      TYPE           CLUSTER-IP      EXTERNAL-IP                                              PORT(S)                      AGE
+traefik   LoadBalancer   10.43.161.248   192.168.1.103,192.168.1.104,192.168.1.107,192.168.1.85   80:31391/TCP,443:30841/TCP   55m
+
+# Get Credentials
+kubectl -n kube-system get secret/traefik-dashboard-auth -o jsonpath='{.data.users}'
+
+# Just joking: admin/admin
+
+# visit http://192.168.1.85:31391/dashboard/dashboard/#/
+```
+
+### K8 Dashboard:
+
+```bash
+# Extract dashboard admin token
+kubectl -n kubernetes-dashboard \
+          get secret dashboard-admin-token -o jsonpath='{.data.token}' | base64 -d
+
+# port-forward 
+kubectl -n kubernetes-dashboard port-forward service/kubernetes-dashboard-kong-proxy 8443:443
+
+# Visit https://localhost:8443
+
+```
+
+### Grafana
+```bash
+# admin user
+kubectl -n kube-system get secrets -n monitoring prometheus-grafana -o jsonpath='{.data.admin-user}' | base64 -d
+# admin password
+kubectl -n kube-system get secrets -n monitoring prometheus-grafana -o jsonpath='{.data.admin-password}' | base64 -d
+
+# visit http://grafana.local/login
+```
+
+### Kibana
+```
+# user: elastic
+# password:
+kubectl get secrets -n elastic elasticsearch-es-elastic-user -o jsonpath='{.data.elastic}' | base64 -d
+
+visit https://kibana.local/kibana/
+```
+
 ## Directory Contents
 
 ### Core Setup Playbooks
@@ -170,13 +233,3 @@ Submit issues or pull requests to enhance this setup. Feedback on automation or 
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
-
----
-
-### Rationale
-- **Structure**: Follows a standard README format for clarity and usability.
-- **Accuracy**: Reflects the exact files you listed and their inferred purposes.
-- **Practicality**: Provides a step-by-step install guide with commands, plus testing and cleanup options.
-- **Flexibility**: Includes customization and notes for adaptability.
-
-Let me know if you’d like to tweak this further, add specific details from your playbooks, or adjust the tone!
