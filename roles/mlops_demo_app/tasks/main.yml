@@ -43,7 +43,7 @@
   become: false
 
 - name: Apply Sealed Secrets (MinIO + Workflow)
-  ansible.builtin.command: kubectl --kubeconfig="{{ kubeconfig_path }}" apply -f "{{ playbook_dir }}/../manifests/sealed-secrets/mlops-secrets.yaml"
+  ansible.builtin.command: kubectl --kubeconfig="{{ kubeconfig_path }}" apply -f "{{ playbook_dir }}/../manifests/sealed-secrets/"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   changed_when: "'configured' in result.stdout or 'created' in result.stdout"
@@ -78,6 +78,13 @@
   loop: "{{ mlops_demo_app_application_files }}"
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
+
+- name: Apply ArgoCD Application for demo-iris-pipeline
+  ansible.builtin.command: kubectl --kubeconfig="{{ kubeconfig_path }}" apply -f "{{ mlops_demo_app_repo_path }}/argocd-apps/demo-iris-pipeline.yaml"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+  become: false
+  changed_when: "'configured' in result.stdout or 'created' in result.stdout"
+  register: result
 
 # Verify deployment
 - name: Wait for Argo CD Application to be synchronized
