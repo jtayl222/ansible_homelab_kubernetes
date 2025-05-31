@@ -84,7 +84,8 @@ kubeconfig
 !roles/fetch_kubeconfig
 !playbooks/sealed_secrets.yml
 !roles/sealed_secrets
-
+!manifests/sealed-secrets
+!manifests/sealed-secrets/*
 
 # Other files that should not be tracked
 */OLD/**
