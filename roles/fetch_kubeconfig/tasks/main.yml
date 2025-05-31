@@ -65,3 +65,11 @@
   delegate_to: localhost
   when:
     - k3s_stat.stat.exists | default(false)
+
+- name: Delete local kubeconfig when uninstalling K3s
+  ansible.builtin.file:
+    path: "{{ kubeconfig_path }}"
+    state: absent
+  delegate_to: localhost
+  become: false
+  when: k3s_state == 'absent'

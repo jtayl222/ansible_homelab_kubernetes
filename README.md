@@ -12,6 +12,32 @@ This project aims to simplify the deployment of a K3s-based Kubernetes cluster w
 - Monitoring with Prometheus and Grafana.
 - Troubleshooting and cleanup tools for experimentation.
 
+## K3S Usage Instructions
+
+### To Install K3s Cluster:
+
+```bash
+# Install K3s (default behavior)
+ansible-playbook -i inventory/production/hosts playbooks/k3s.yml
+```
+
+### To Uninstall K3s Cluster:
+
+```bash
+# Uninstall K3s
+ansible-playbook -i inventory/production/hosts playbooks/k3s.yml -e "k3s_state=absent"
+```
+
+### To Reinstall K3s Cluster:
+
+```bash
+# Uninstall then install K3s
+ansible-playbook -i inventory/production/hosts playbooks/k3s.yml -e "k3s_state=absent"
+ansible-playbook -i inventory/production/hosts playbooks/k3s.yml
+```
+
+These changes allow complete control over the K3s installation state by adding conditional tasks to the existing roles rather than creating new roles or playbooks. The uninstall process will properly clean up both control plane and worker nodes, making it easy to reinstall from scratch if needed.
+
 ## NOTES
 
 ### get kube config

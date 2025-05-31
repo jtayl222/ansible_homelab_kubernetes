@@ -7,6 +7,8 @@
   hosts: k3s_control_plane
   become: true
   gather_facts: true
+  vars:
+    k3s_state: present  # Add this line
   roles:
     - role: k3s_control_plane
       tags: [k3s, control_plane]
@@ -14,6 +16,8 @@
 - name: Fetch kubeconfig to localhost
   hosts: localhost
   gather_facts: false
+  vars:
+    k3s_state: present  # Add this line
   roles:
     - role: fetch_kubeconfig
       tags: [k3s, kubeconfig]
@@ -22,6 +26,8 @@
   hosts: k3s_workers
   become: true
   gather_facts: true
+  vars:
+    k3s_state: present  # Add this line
   roles:
     - role: k3s_workers
       tags: [k3s, workers]
