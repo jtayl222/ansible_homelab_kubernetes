@@ -123,7 +123,7 @@
             storage: "{{ mlflow_db_pvc_size }}"
         storageClassName: nfs-client
 
-  # Deploy MLflow server - FIXED COMMAND
+  # Deploy MLflow server - UPDATED FOR OFFICIAL IMAGE
 - name: Deploy MLflow server
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"
@@ -153,12 +153,14 @@
                   - sh
                   - -c
                   - |
-                    mkdir -p /mnt/mlflow
-                    chmod -R 777 /mnt/mlflow
+                    mkdir -p /mnt/mlflow /mnt/database
+                    chmod -R 777 /mnt/mlflow /mnt/database
                     echo "Ensuring all required permissions are set"
                 volumeMounts:
                   - name: mlflow-artifacts
                     mountPath: /mnt/mlflow
+                  - name: mlflow-database
+                    mountPath: /mnt/database
             containers:
               - name: mlflow
                 image: "{{ mlflow_image }}"
@@ -166,16 +168,14 @@
                 ports:
                   - containerPort: 5000
                     name: http
-                command: ["/bin/sh", "-c"]
+                command: ["mlflow"]
                 args:
-                  - |
-                    pip install boto3
-                    mlflow server \
-                      --host=0.0.0.0 \
-                      --port=5000 \
-                      --backend-store-uri=sqlite:///{{ mlflow_db_path }} \
-                      --default-artifact-root={{ mlflow_artifacts_path }} \
-                      --serve-artifacts
+                  - "server"
+                  - "--host=0.0.0.0"
+                  - "--port=5000"
+                  - "--backend-store-uri=sqlite:///mnt/database/mlflow.db"
+                  - "--default-artifact-root=/mnt/mlflow"
+                  - "--serve-artifacts"
                 env:
                   - name: AWS_ACCESS_KEY_ID
                     value: "{{ minio_access_key }}"
@@ -189,43 +189,39 @@
                     value: "180"
                 readinessProbe:
                   httpGet:
-                    path: /
-                    port: 5000
-                  initialDelaySeconds: 10
-                  periodSeconds: 10
-                livenessProbe:
-                  httpGet:
-                    path: /
+                    path: /health
                     port: 5000
                   initialDelaySeconds: 30
+                  periodSeconds: 10
+                  timeoutSeconds: 5
+                  failureThreshold: 3
+                livenessProbe:
+                  httpGet:
+                    path: /health
+                    port: 5000
+                  initialDelaySeconds: 60
                   periodSeconds: 20
+                  timeoutSeconds: 10
+                  failureThreshold: 3
                 resources:
                   requests:
-                    memory: 512Mi
-                    cpu: 100m
+                    memory: "{{ mlflow_memory_request }}"
+                    cpu: "{{ mlflow_cpu_request }}"
                   limits:
-                    memory: 1Gi
-                    cpu: 500m
+                    memory: "{{ mlflow_memory_limit }}"
+                    cpu: "{{ mlflow_cpu_limit }}"
                 volumeMounts:
                   - name: mlflow-artifacts
-                    mountPath: /mnt/mlflow # Change to a local path, not s3://
-                  - name: dependencies
-                    mountPath: /usr/local/lib/python3.10/site-packages/boto3
-                    subPath: boto3
-                  - name: dependencies
-                    mountPath: /usr/local/lib/python3.10/site-packages/botocore
-                    subPath: botocore
-                  - name: mlflow-database # Changed name
-                    mountPath: /mnt/database # Changed path
+                    mountPath: /mnt/mlflow
+                  - name: mlflow-database
+                    mountPath: /mnt/database
             volumes:
               - name: mlflow-artifacts
                 persistentVolumeClaim:
                   claimName: mlflow-artifacts
-              - name: dependencies
-                emptyDir: {}
-              - name: mlflow-database # Changed name
+              - name: mlflow-database
                 persistentVolumeClaim:
-                  claimName: "{{ mlflow_db_pvc_name }}" # Changed reference
+                  claimName: "{{ mlflow_db_pvc_name }}"
   become: false
 
   # Create MLflow service

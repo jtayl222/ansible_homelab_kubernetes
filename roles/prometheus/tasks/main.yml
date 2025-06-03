@@ -43,13 +43,6 @@
   changed_when: false
   failed_when: false
 
-- name: Fail if Prometheus is already installed
-  ansible.builtin.fail:
-    msg:
-      "Prometheus release {{ prometheus_release_name }} detected: remove or clean
-      up first!"
-  when: existing_prometheus.stdout | length > 0
-
 - name: Create monitoring namespace
   kubernetes.core.k8s:
     kubeconfig: "{{ kubeconfig_path }}"

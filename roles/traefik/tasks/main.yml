@@ -333,6 +333,13 @@
     seconds: 20
   delegate_to: "{{ groups['ansible_controller'][0] }}"
 
+- name: Create generated directory
+  ansible.builtin.file:
+    path: "{{ playbook_dir }}/../generated"
+    state: directory
+    mode: "0755"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
+
 - name: Create port-forward script
   ansible.builtin.copy:
     dest: "{{ playbook_dir }}/../generated/dashboard.sh"

@@ -10,48 +10,6 @@
   become: false
   changed_when: false
 
-- name: Delete existing Kibana ECK deployment
-  ansible.builtin.shell: |
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      delete kibana kibana --wait=false
-  register: kibana_delete
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-  failed_when:
-    - kibana_delete.rc != 0
-    - "'NotFound' not in kibana_delete.stderr | default('')"
-    - "'not found' not in kibana_delete.stderr | default('')"
-  changed_when: kibana_delete.rc == 0 and kibana_delete.stdout != ""
-
-- name: Delete existing Kibana manual deployment
-  ansible.builtin.shell: |
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      delete deployment kibana --wait=false
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      delete service kibana --wait=false
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      delete service kibana-nodeport --wait=false
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      delete service kibana-kb-nodeport --wait=false
-  register: kibana_manual_delete
-  changed_when: kibana_manual_delete.rc == 0 and kibana_manual_delete.stdout != ""
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-  ignore_errors: true
-
-- name: Wait for Kibana ECK to be deleted
-  ansible.builtin.shell: |
-    kubectl --kubeconfig={{ kubeconfig_path }} -n {{ elastic_namespace }} \
-      get kibana kibana 2>/dev/null || echo "Kibana deleted"
-  register: kibana_deleted
-  until: '"Kibana deleted" in kibana_deleted.stdout'
-  retries: 15
-  delay: 5
-  changed_when: false  # This is just checking status, not making changes
-  delegate_to: "{{ groups['ansible_controller'][0] }}"
-  become: false
-  ignore_errors: true
-
 - name: Get elastic user password
   ansible.builtin.shell: |
     set -o pipefail  # Add pipefail
@@ -282,8 +240,6 @@
           server.name: kibana
           server.host: "0.0.0.0"
           server.publicBaseUrl: "{{ kibana_url }}"
-          server.basePath: "/kibana"
-          server.rewriteBasePath: true
           elasticsearch.hosts: ["https://elasticsearch-es-http.{{ elastic_namespace }}.svc:9200"]
           elasticsearch.username: "kibana_system"
           elasticsearch.password: "{{ kibana_password_from_secret.stdout }}"
@@ -518,7 +474,7 @@
             initContainers:
               - name: init-certs-dir
                 image: busybox:1.33.1
-                ansible.builtin.command: [sh, -c, mkdir -p /usr/share/kibana/config/certs]
+                command: [sh, -c, "mkdir -p /usr/share/kibana/config/certs"]  # Fix the command syntax
                 volumeMounts:
                   - name: config-dir
                     mountPath: /usr/share/kibana/config
@@ -546,18 +502,23 @@
                     memory: 2Gi
                     cpu: 1
                 readinessProbe:
-                  exec:
-                    command:
-                      - bash
-                      - -c
-                      - |
-                        #!/bin/bash
-                        # Check if Kibana is running by looking for the server process
-                        pgrep -f "node.*src/cli/dist" > /dev/null && exit 0 || exit 1
-                  initialDelaySeconds: 120
-                  periodSeconds: 15
+                  httpGet:
+                    path: /api/status
+                    port: 5601
+                    scheme: HTTPS
+                  initialDelaySeconds: 60
+                  periodSeconds: 10
                   timeoutSeconds: 5
                   failureThreshold: 10
+                livenessProbe:
+                  httpGet:
+                    path: /api/status
+                    port: 5601
+                    scheme: HTTPS
+                  initialDelaySeconds: 120
+                  periodSeconds: 20
+                  timeoutSeconds: 10
+                  failureThreshold: 6
                 volumeMounts:
                   - name: config
                     mountPath: /usr/share/kibana/config/kibana.yml

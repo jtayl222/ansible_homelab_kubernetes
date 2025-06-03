@@ -128,8 +128,10 @@
 
 - name: Add Seldon Core Helm repository
   kubernetes.core.helm_repository:
-    name: "{{ seldon_chart_repo }}"
-    repo_url: https://storage.googleapis.com/seldon-charts
+    name: "{{ seldon_chart_repo_name }}"  # Change this line
+    repo_url: "{{ seldon_chart_repo }}"   # Change this line
+    kubeconfig: "{{ kubeconfig_path }}"
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
 
 - name: Check if Istio is installed
@@ -167,54 +169,80 @@
 
 - name: Deploy Seldon Core using Helm
   kubernetes.core.helm:
-    kubeconfig: "{{ kubeconfig_path }}"
-    release_name: seldon-core
-    chart_ref: "{{ seldon_chart_repo }}/{{ seldon_chart_name }}"
-    release_namespace: "{{ seldon_namespace }}"
+    name: "{{ seldon_release_name }}"
+    chart_ref: "{{ seldon_chart_repo_name }}/{{ seldon_chart_name }}"
     chart_version: "{{ seldon_chart_version }}"
+    release_namespace: "{{ seldon_namespace }}"
+    create_namespace: true
+    kubeconfig: "{{ kubeconfig_path }}"
     values:
-      usageMetrics:
-        enabled: false
-      istio:
-        enabled: false
-      ambassador:
-        enabled: false
-      ingress:
-        enabled: true
-      defaultUserID: "1000"
-      executor:
-        image:
-          pullPolicy: IfNotPresent
+      # Seldon Core Operator configuration
+      operator:
         resources:
           requests:
-            cpu: 100m
-            memory: 250Mi
+            memory: "{{ seldon_operator_memory_request }}"
+            cpu: "{{ seldon_operator_cpu_request }}"
           limits:
-            cpu: 500m
-            memory: 500Mi
-      predictor_servers:
-        TENSORFLOW_SERVER:
-          protocols:
-            tensorflow:
-              defaultImageVersion: 2.6.2
-        SKLEARN_SERVER:
-          protocols:
-            seldon:
-              defaultImageVersion: 1.11.2
-        XGBOOST_SERVER:
-          protocols:
-            seldon:
-              defaultImageVersion: 1.11.2
-        MLFLOW_SERVER:
-          protocols:
-            seldon:
-              defaultImageVersion: 1.15.0
+            memory: "{{ seldon_operator_memory_limit }}"
+            cpu: "{{ seldon_operator_cpu_limit }}"
+      
+      # Webhook configuration
+      webhook:
+        port: 4443
+      
+      # Credentials for pulling images
+      defaultUserID: "8888"
+      
+      # Storage initializer configuration
       storageInitializer:
-        enabled: "{{ 'not found' not in minio_ns_check.stdout }}"
-        image: seldonio/rclone-storage-initializer:1.16.0
-        envSecretRefName: "{{ seldon_minio_secret_name }}"
-      certManager:
+        image: seldonio/rclone-storage-initializer:1.17.1
+      
+      # Executor configuration
+      executor:
+        enabled: true
+        image:
+          tag: 1.17.1
+        resources:
+          requests:
+            memory: "{{ seldon_memory_request }}"
+            cpu: "{{ seldon_cpu_request }}"
+          limits:
+            memory: "{{ seldon_memory_limit }}"
+            cpu: "{{ seldon_cpu_limit }}"
+      
+      # Ambassador configuration (disabled)
+      ambassador:
+        enabled: "{{ seldon_enable_ambassador }}"
+      
+      # Istio configuration (disabled)
+      istio:
+        enabled: "{{ seldon_enable_istio }}"
+        gateway: "{{ seldon_gateway if seldon_enable_istio else 'kubeflow/kubeflow-gateway' }}"
+      
+      # Analytics configuration
+      analytics:
+        enabled: "{{ seldon_enable_analytics }}"
+      
+      # Engine configuration
+      engine:
+        image:
+          tag: 1.17.1
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "100m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
+      
+      # Keda configuration (disabled by default)
+      keda:
         enabled: false
+      
+      # Single namespace mode (recommended for homelab)
+      singleNamespace: true
+      
+  delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: seldon_deploy
 
@@ -352,7 +380,7 @@
   ansible.builtin.shell: |
     kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} rollout status deployment \
       $(kubectl --kubeconfig={{ kubeconfig_path }} -n {{ seldon_namespace }} \
-        get deployment -l seldon-deployment-id=iris-model -o name | head -1) \
+        get deployment -l seldon-deployment-id=iris-model -o jsonpath='{.items[0].metadata.name}') \
       --timeout=180s
   register: example_rollout
   become: false

@@ -83,7 +83,7 @@
   ansible.builtin.stat:
     path: /usr/local/bin/k3s-uninstall.sh
   register: uninstall_script
-  when: k3s_state == 'absent' and k3s_binary.stat.exists
+  when: k3s_state == 'absent'
 
 - name: Run k3s uninstall script
   ansible.builtin.command: /usr/local/bin/k3s-uninstall.sh
