@@ -185,18 +185,18 @@
           limits:
             memory: "{{ seldon_operator_memory_limit }}"
             cpu: "{{ seldon_operator_cpu_limit }}"
-      
+
       # Webhook configuration
       webhook:
         port: 4443
-      
+
       # Credentials for pulling images
       defaultUserID: "8888"
-      
+
       # Storage initializer configuration
       storageInitializer:
         image: seldonio/rclone-storage-initializer:1.17.1
-      
+
       # Executor configuration
       executor:
         enabled: true
@@ -209,20 +209,20 @@
           limits:
             memory: "{{ seldon_memory_limit }}"
             cpu: "{{ seldon_cpu_limit }}"
-      
+
       # Ambassador configuration (disabled)
       ambassador:
         enabled: "{{ seldon_enable_ambassador }}"
-      
+
       # Istio configuration (disabled)
       istio:
         enabled: "{{ seldon_enable_istio }}"
         gateway: "{{ seldon_gateway if seldon_enable_istio else 'kubeflow/kubeflow-gateway' }}"
-      
+
       # Analytics configuration
       analytics:
         enabled: "{{ seldon_enable_analytics }}"
-      
+
       # Engine configuration
       engine:
         image:
@@ -234,14 +234,14 @@
           limits:
             memory: "1Gi"
             cpu: "500m"
-      
+
       # Keda configuration (disabled by default)
       keda:
         enabled: false
-      
+
       # Single namespace mode (recommended for homelab)
       singleNamespace: true
-      
+
   delegate_to: "{{ groups['ansible_controller'][0] }}"
   become: false
   register: seldon_deploy

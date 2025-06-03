@@ -31,7 +31,9 @@
                         cpu: "{{ elasticsearch_cpu_limit }}"
                     env:
                       - name: ES_JAVA_OPTS
-                        value: "-Xms{{ (elasticsearch_memory_request | regex_replace('Gi', '') | int * 0.5) | int }}g -Xmx{{ (elasticsearch_memory_request | regex_replace('Gi', '') | int * 0.5) | int }}g"
+                        value: >-
+                          -Xms{{ (elasticsearch_memory_request | regex_replace('Gi', '') | int * 0.5) | int }}g
+                          -Xmx{{ (elasticsearch_memory_request | regex_replace('Gi', '') | int * 0.5) | int }}g"
             volumeClaimTemplates:
               - metadata:
                   name: elasticsearch-data
